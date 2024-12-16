@@ -336,7 +336,7 @@ class AuthProvider extends ChangeNotifier {
     await supabase.auth.signOut();
     isAuthenticated = false;
     userId = null;
-    email = null; *
+    email = null;
     notifyListeners();
   }
 }
@@ -746,18 +746,39 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   final ApiService apiService = ApiService();
-  late Future<List<Product>> products;
+  late Future<List<Product>> productsFuture;
+  List<Product> allProducts = []; // Все продукты
+  List<Product> filteredProducts = []; // Отфильтрованные продукты
+  final TextEditingController _searchController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
-    products = apiService.fetchProducts();
+    productsFuture = apiService.fetchProducts();
+    _searchController.addListener(_onSearchChanged);
+  }
+
+  @override
+  void dispose() {
+    _searchController.removeListener(_onSearchChanged);
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  // Обработчик изменений в поле поиска
+  void _onSearchChanged() {
+    final query = _searchController.text.toLowerCase();
+    setState(() {
+      filteredProducts = allProducts.where((product) {
+        return product.name.toLowerCase().contains(query);
+      }).toList();
+    });
   }
 
   // Обновить список продуктов
   void refreshProducts() {
     setState(() {
-      products = apiService.fetchProducts();
+      productsFuture = apiService.fetchProducts();
     });
   }
 
@@ -787,9 +808,27 @@ class _HomePageState extends State<HomePage> {
             },
           ),
         ],
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(56.0),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+            child: TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                hintText: 'Поиск товаров по названию',
+                prefixIcon: const Icon(Icons.search),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8.0),
+                ),
+                filled: true,
+                fillColor: Colors.white,
+              ),
+            ),
+          ),
+        ),
       ),
       body: FutureBuilder<List<Product>>(
-        future: products,
+        future: productsFuture,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
@@ -798,11 +837,20 @@ class _HomePageState extends State<HomePage> {
             return Center(child: Text('Ошибка: ${snapshot.error}'));
           }
 
-          final items = snapshot.data!;
+          allProducts = snapshot.data!;
+          // Если есть поисковый запрос, используем отфильтрованный список, иначе все продукты
+          final displayProducts = _searchController.text.isEmpty
+              ? allProducts
+              : filteredProducts;
+
+          if (displayProducts.isEmpty) {
+            return const Center(child: Text('Нет товаров, соответствующих запросу'));
+          }
+
           return ListView.builder(
-            itemCount: items.length,
+            itemCount: displayProducts.length,
             itemBuilder: (context, index) {
-              final product = items[index];
+              final product = displayProducts[index];
               final isFavorite = favoritesProvider.isFavorite(product.productId);
               return Card(
                 margin: const EdgeInsets.all(8.0),
@@ -903,11 +951,17 @@ class _HomePageState extends State<HomePage> {
           Navigator.push(
             context,
             MaterialPageRoute(builder: (context) => const CreateProductPage()),
-          ).then((_) {
-            refreshProducts();
-            final favoritesProvider = p.Provider.of<FavoritesProvider>(context, listen: false);
+          ).then((newProduct) {
+            if (newProduct != null && newProduct is Product) {
+              setState(() {
+                allProducts.add(newProduct); // Добавляем в общий список
+                _searchController.text = newProduct.name; // Устанавливаем поисковый запрос
+                _onSearchChanged(); // Обновляем фильтр
+              });
+            }
             favoritesProvider.loadFavorites();
           });
+
         },
       ),
     );
@@ -1227,10 +1281,19 @@ class _CreateProductPageState extends State<CreateProductPage> {
           "stock": stock,
           "image_url": imageUrl,
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Продукт создан успешно')),
+
+// Создаем локальный объект продукта
+        final newProduct = Product(
+          productId: DateTime.now().millisecondsSinceEpoch, // Временный ID
+          name: name,
+          description: description,
+          price: price,
+          stock: stock,
+          imageUrl: imageUrl,
         );
-        Navigator.pop(context);
+
+// Добавляем товар в список
+        Navigator.pop(context, newProduct);
       } catch (e) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Ошибка создания продукта: $e')),
