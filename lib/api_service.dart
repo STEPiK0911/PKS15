@@ -182,3 +182,5 @@ class ApiService {
       throw Exception("Ошибка создания пользователя: $e");
     }
   }
+
+

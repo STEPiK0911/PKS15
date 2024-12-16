@@ -34,6 +34,31 @@ class Product {
   }
 }
 
+
+
+class Order {
+  final String productName;
+  final double price;
+  final String status;
+
+  Order({
+    required this.productName,
+    required this.price,
+    this.status = 'В обработке',
+  });
+}
+
+class OrdersProvider extends ChangeNotifier {
+  final List<Order> _orders = [];
+
+  List<Order> get orders => List.unmodifiable(_orders);
+
+  void addOrder(String productName, double price) {
+    _orders.add(Order(productName: productName, price: price));
+    notifyListeners();
+  }
+}
+
 /// API сервис для взаимодействия с сервером
 class ApiService {
   final String baseUrl = 'http://10.0.2.2:8080'; // Измените на ваш URL сервера
@@ -344,59 +369,34 @@ class AuthProvider extends ChangeNotifier {
 
 /// Провайдер для корзины
 class CartProvider extends ChangeNotifier {
-  final ApiService apiService = ApiService();
-  List<Product> _items = [];
-  double _totalPrice = 0.0;
+  List<Product> _items = []; // Локальный список товаров
+  double _totalPrice = 0.0; // Общая стоимость товаров
 
   List<Product> get items => _items;
   double get totalPrice => _totalPrice;
 
-  CartProvider() {
-    loadCart();
+  // Добавление товара в корзину
+  void addToCart(Product product) {
+    _items.add(product);
+    _totalPrice += product.price;
+    notifyListeners();
   }
 
-  // Загрузить корзину из сервера
-  Future<void> loadCart() async {
-    try {
-      _items = await apiService.fetchCart();
-      _totalPrice = _items.fold(0.0, (sum, item) => sum + item.price);
-      notifyListeners();
-    } catch (e) {
-      print('Ошибка загрузки корзины: $e');
-    }
+  // Удаление товара из корзины
+  void removeFromCart(Product product) {
+    _items.remove(product);
+    _totalPrice -= product.price;
+    notifyListeners();
   }
 
-  // Добавить товар в корзину
-  Future<void> addToCart(Product product) async {
-    try {
-      await apiService.addToCart(product.productId);
-      _items.add(product);
-      _totalPrice += product.price;
-      notifyListeners();
-    } catch (e) {
-      print('Ошибка добавления в корзину: $e');
-    }
-  }
-
-  // Удалить товар из корзины
-  Future<void> removeFromCart(Product product) async {
-    try {
-      await apiService.removeFromCart(product.productId);
-      _items.removeWhere((item) => item.productId == product.productId);
-      _totalPrice -= product.price;
-      notifyListeners();
-    } catch (e) {
-      print('Ошибка удаления из корзины: $e');
-    }
-  }
-
-  // Очистить корзину
+  // Очистка корзины
   void clearCart() {
     _items.clear();
     _totalPrice = 0.0;
     notifyListeners();
   }
 }
+
 
 /// Провайдер для избранного
 class FavoritesProvider extends ChangeNotifier {
@@ -464,11 +464,47 @@ void main() async {
         p.ChangeNotifierProvider(create: (context) => AuthProvider()),
         p.ChangeNotifierProvider(create: (context) => CartProvider()),
         p.ChangeNotifierProvider(create: (context) => FavoritesProvider()),
+        p.ChangeNotifierProvider(create: (_) => OrdersProvider()), // Добавляем
+
       ],
       child: const MyApp(),
     ),
   );
 }
+
+
+class OrdersPage extends StatelessWidget {
+  const OrdersPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final ordersProvider = p.Provider.of<OrdersProvider>(context);
+    final orders = ordersProvider.orders;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Мои заказы')),
+      body: orders.isEmpty
+          ? const Center(child: Text('У вас пока нет заказов'))
+          : ListView.builder(
+        itemCount: orders.length,
+        itemBuilder: (context, index) {
+          final order = orders[index];
+          return Card(
+            margin: const EdgeInsets.all(8.0),
+            child: ListTile(
+              title: Text(order.productName),
+              subtitle: Text(
+                'Статус: ${order.status}\nЦена: ${order.price.toStringAsFixed(2)} ₽',
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+
 
 /// Главный виджет приложения
 class MyApp extends StatelessWidget {
@@ -492,55 +528,40 @@ class ProfilePage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final authProvider = p.Provider.of<AuthProvider>(context); // Используем алиас
     return Scaffold(
       appBar: AppBar(title: const Text('Профиль')),
       body: Center(
-        child: authProvider.isAuthenticated
-            ? Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text('Вы вошли как: ${authProvider.email ?? 'Неизвестный пользователь'}'),
-            const SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: () async {
-                await authProvider.signOut();
-              },
-              child: const Text('Выйти'),
-            ),
-            const SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => const HomePage()),
-                );
-              },
-              child: const Text('Перейти к продуктам'),
-            ),
-          ],
-        )
-            : Column(
+        child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             ElevatedButton(
               onPressed: () {
                 Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (context) => const LoginPage()),
+                  MaterialPageRoute(builder: (context) => const HomePage()), // Переход в каталог
                 );
               },
-              child: const Text('Войти'),
+              child: const Text('Каталог продуктов'),
             ),
             const SizedBox(height: 10),
             ElevatedButton(
               onPressed: () {
                 Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (context) => const RegisterPage()),
+                  MaterialPageRoute(builder: (context) => const CartPage()), // Переход в корзину
                 );
               },
-              child: const Text('Зарегистрироваться'),
+              child: const Text('Корзина'),
+            ),
+            const SizedBox(height: 10),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const OrdersPage()), // Переход в заказы
+                );
+              },
+              child: const Text('Мои заказы'),
             ),
           ],
         ),
@@ -548,6 +569,8 @@ class ProfilePage extends StatelessWidget {
     );
   }
 }
+
+
 
 /// Страница регистрации
 class RegisterPage extends StatefulWidget {
@@ -735,6 +758,7 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 }
+
 
 /// Главная страница с продуктами
 class HomePage extends StatefulWidget {
@@ -1027,7 +1051,7 @@ class _ProductDetailsPageState extends State<ProductDetailsPage> {
   void addToCart() async {
     final cartProvider = p.Provider.of<CartProvider>(context, listen: false);
     try {
-      await cartProvider.addToCart(widget.product);
+      cartProvider.addToCart(widget.product);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('${widget.product.name} добавлен в корзину')),
       );
@@ -1101,14 +1125,15 @@ class _ProductDetailsPageState extends State<ProductDetailsPage> {
   }
 }
 
-/// Страница корзины
 class CartPage extends StatelessWidget {
   const CartPage({super.key});
 
   @override
   Widget build(BuildContext context) {
     final cartProvider = p.Provider.of<CartProvider>(context);
+    final ordersProvider = p.Provider.of<OrdersProvider>(context);
     final cartItems = cartProvider.items;
+
     return Scaffold(
       appBar: AppBar(title: const Text('Корзина')),
       body: cartItems.isEmpty
@@ -1125,45 +1150,39 @@ class CartPage extends StatelessWidget {
                   subtitle: Text('${product.price.toStringAsFixed(2)} ₽'),
                   trailing: IconButton(
                     icon: const Icon(Icons.delete, color: Colors.red),
-                    onPressed: () async {
-                      try {
-                        await cartProvider.removeFromCart(product);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('${product.name} удален из корзины')),
-                        );
-                      } catch (e) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Ошибка удаления из корзины: $e')),
-                        );
-                      }
+                    onPressed: () {
+                      cartProvider.removeFromCart(product);
                     },
                   ),
-                  leading: product.imageUrl.isNotEmpty
-                      ? Image.network(
-                    product.imageUrl,
-                    width: 50,
-                    height: 50,
-                    fit: BoxFit.cover,
-                    errorBuilder: (context, error, stackTrace) {
-                      return const Icon(Icons.image_not_supported);
-                    },
-                  )
-                      : const Icon(Icons.image),
-                  onTap: () {
-                    // Можно добавить навигацию к деталям продукта
-                  },
                 );
               },
             ),
           ),
           Padding(
             padding: const EdgeInsets.all(16.0),
-            child: Text(
-              'Итого: ${cartProvider.totalPrice.toStringAsFixed(2)} ₽',
-              style: const TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-              ),
+            child: Column(
+              children: [
+                Text(
+                  'Итого: ${cartProvider.totalPrice.toStringAsFixed(2)} ₽',
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                ElevatedButton(
+                  onPressed: () {
+                    for (var product in cartItems) {
+                      ordersProvider.addOrder(product.name, product.price);
+                    }
+                    cartProvider.clearCart();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Заказ оформлен')),
+                    );
+                  },
+                  child: const Text('Сделать заказ'),
+                ),
+              ],
             ),
           ),
         ],
@@ -1171,6 +1190,8 @@ class CartPage extends StatelessWidget {
     );
   }
 }
+
+
 
 /// Страница избранного
 class FavoritesPage extends StatelessWidget {
