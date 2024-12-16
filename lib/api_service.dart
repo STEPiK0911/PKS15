@@ -166,3 +166,19 @@ class ApiService {
     }
   }
 }
+
+  // Создать пользователя в серверной базе данных
+  Future<void> createUser(String userId) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/users/create'),
+        headers: {"Content-Type": "application/json"},
+        body: json.encode({"user_id": userId}),
+      );
+      if (response.statusCode != 201) {
+        throw Exception("Ошибка создания пользователя: ${response.statusCode}");
+      }
+    } catch (e) {
+      throw Exception("Ошибка создания пользователя: $e");
+    }
+  }

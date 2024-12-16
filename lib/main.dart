@@ -1,7 +1,8 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
+import 'package:provider/provider.dart' as p; // Алиас для provider
 import 'package:http/http.dart' as http;
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Модель данных продукта
 class Product {
@@ -36,11 +37,25 @@ class Product {
 /// API сервис для взаимодействия с сервером
 class ApiService {
   final String baseUrl = 'http://10.0.2.2:8080'; // Измените на ваш URL сервера
+  final SupabaseClient supabase = Supabase.instance.client;
+
+  // Получить текущий JWT токен
+  String? get jwtToken => supabase.auth.currentSession?.accessToken;
+
+
 
   // Получить все продукты
   Future<List<Product>> fetchProducts() async {
     try {
-      final response = await http.get(Uri.parse('$baseUrl/products'));
+      final response = await http.get(
+        Uri.parse('$baseUrl/products'),
+        headers: {
+          "Content-Type": "application/json",
+          if (jwtToken != null) "Authorization": "Bearer $jwtToken",
+        },
+      );
+      print('Статус-код: ${response.statusCode}');
+      print('Ответ: ${response.body}');
       if (response.statusCode == 200) {
         List<dynamic> data = json.decode(response.body);
         return data.map((json) => Product.fromJson(json)).toList();
@@ -48,7 +63,8 @@ class ApiService {
         throw Exception("Ошибка загрузки данных: ${response.statusCode}");
       }
     } catch (e) {
-      throw Exception("Ошибка загрузки данных: $e");
+      print('Ошибка запроса: $e');
+      throw Exception("Ошибка загрузки данных");
     }
   }
 
@@ -57,13 +73,19 @@ class ApiService {
     try {
       final response = await http.post(
         Uri.parse("$baseUrl/products/create"),
-        headers: {"Content-Type": "application/json"},
+        headers: {
+          "Content-Type": "application/json",
+          if (jwtToken != null) "Authorization": "Bearer $jwtToken",
+        },
         body: json.encode(productData),
       );
+      print('Статус-код создания: ${response.statusCode}');
+      print('Ответ создания: ${response.body}');
       if (response.statusCode != 201) {
         throw Exception("Ошибка создания продукта: ${response.statusCode}");
       }
     } catch (e) {
+      print('Ошибка запроса при создании: $e');
       throw Exception("Ошибка создания продукта: $e");
     }
   }
@@ -71,11 +93,19 @@ class ApiService {
   // Удалить продукт
   Future<void> deleteProduct(int productId) async {
     try {
-      final response = await http.delete(Uri.parse('$baseUrl/products/delete/$productId'));
+      final response = await http.delete(
+        Uri.parse('$baseUrl/products/delete/$productId'),
+        headers: {
+          if (jwtToken != null) "Authorization": "Bearer $jwtToken",
+        },
+      );
+      print('Статус-код удаления: ${response.statusCode}');
+      print('Ответ удаления: ${response.body}');
       if (response.statusCode != 200) {
         throw Exception("Ошибка удаления продукта: ${response.statusCode}");
       }
     } catch (e) {
+      print('Ошибка запроса при удалении: $e');
       throw Exception("Ошибка удаления продукта: $e");
     }
   }
@@ -83,39 +113,68 @@ class ApiService {
   /* ----------------------- Функционал Избранного (Favorites) ----------------------- */
 
   // Добавить в избранное
-  Future<void> addToFavorites(int productId, int userId) async {
+  Future<void> addToFavorites(int productId) async {
+    if (supabase.auth.currentSession == null) {
+      throw Exception("Пользователь не аутентифицирован");
+    }
     try {
       final response = await http.post(
         Uri.parse('$baseUrl/favorites/add'),
-        headers: {"Content-Type": "application/json"},
-        body: json.encode({"product_id": productId, "user_id": userId}),
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer $jwtToken",
+        },
+        body: json.encode({"product_id": productId}),
       );
+      print('Статус-код добавления в избранное: ${response.statusCode}');
+      print('Ответ добавления в избранное: ${response.body}');
       if (response.statusCode != 200) {
         throw Exception("Ошибка добавления в избранное: ${response.statusCode}");
       }
     } catch (e) {
+      print('Ошибка запроса при добавлении в избранное: $e');
       throw Exception("Ошибка добавления в избранное: $e");
     }
   }
 
   // Удалить из избранного
-  Future<void> removeFromFavorites(int productId, int userId) async {
+  Future<void> removeFromFavorites(int productId) async {
+    if (supabase.auth.currentSession == null) {
+      throw Exception("Пользователь не аутентифицирован");
+    }
     try {
       final response = await http.delete(
-        Uri.parse('$baseUrl/favorites/remove/$productId?user_id=$userId'),
+        Uri.parse('$baseUrl/favorites/remove/$productId'),
+        headers: {
+          "Authorization": "Bearer $jwtToken",
+        },
       );
+      print('Статус-код удаления из избранного: ${response.statusCode}');
+      print('Ответ удаления из избранного: ${response.body}');
       if (response.statusCode != 200) {
         throw Exception("Ошибка удаления из избранного: ${response.statusCode}");
       }
     } catch (e) {
+      print('Ошибка запроса при удалении из избранного: $e');
       throw Exception("Ошибка удаления из избранного: $e");
     }
   }
 
   // Получить избранные товары
-  Future<List<Product>> fetchFavorites(int userId) async {
+  Future<List<Product>> fetchFavorites() async {
+    if (supabase.auth.currentSession == null) {
+      throw Exception("Пользователь не аутентифицирован");
+    }
     try {
-      final response = await http.get(Uri.parse('$baseUrl/favorites?user_id=$userId'));
+      final response = await http.get(
+        Uri.parse('$baseUrl/favorites'),
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer $jwtToken",
+        },
+      );
+      print('Статус-код получения избранного: ${response.statusCode}');
+      print('Ответ получения избранного: ${response.body}');
       if (response.statusCode == 200) {
         List<dynamic> data = json.decode(response.body);
         return data.map((json) => Product.fromJson(json)).toList();
@@ -123,6 +182,7 @@ class ApiService {
         throw Exception("Ошибка загрузки избранных товаров: ${response.statusCode}");
       }
     } catch (e) {
+      print('Ошибка запроса при получении избранного: $e');
       throw Exception("Ошибка загрузки избранных товаров: $e");
     }
   }
@@ -130,39 +190,68 @@ class ApiService {
   /* ----------------------- Функционал Корзины (Cart) ----------------------- */
 
   // Добавить в корзину
-  Future<void> addToCart(int productId, int userId) async {
+  Future<void> addToCart(int productId) async {
+    if (supabase.auth.currentSession == null) {
+      throw Exception("Пользователь не аутентифицирован");
+    }
     try {
       final response = await http.post(
         Uri.parse('$baseUrl/cart/add'),
-        headers: {"Content-Type": "application/json"},
-        body: json.encode({"product_id": productId, "user_id": userId}),
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer $jwtToken",
+        },
+        body: json.encode({"product_id": productId}),
       );
+      print('Статус-код добавления в корзину: ${response.statusCode}');
+      print('Ответ добавления в корзину: ${response.body}');
       if (response.statusCode != 200) {
         throw Exception("Ошибка добавления в корзину: ${response.statusCode}");
       }
     } catch (e) {
+      print('Ошибка запроса при добавлении в корзину: $e');
       throw Exception("Ошибка добавления в корзину: $e");
     }
   }
 
   // Удалить из корзины
-  Future<void> removeFromCart(int productId, int userId) async {
+  Future<void> removeFromCart(int productId) async {
+    if (supabase.auth.currentSession == null) {
+      throw Exception("Пользователь не аутентифицирован");
+    }
     try {
       final response = await http.delete(
-        Uri.parse('$baseUrl/cart/remove/$productId?user_id=$userId'),
+        Uri.parse('$baseUrl/cart/remove/$productId'),
+        headers: {
+          "Authorization": "Bearer $jwtToken",
+        },
       );
+      print('Статус-код удаления из корзины: ${response.statusCode}');
+      print('Ответ удаления из корзины: ${response.body}');
       if (response.statusCode != 200) {
         throw Exception("Ошибка удаления из корзины: ${response.statusCode}");
       }
     } catch (e) {
+      print('Ошибка запроса при удалении из корзины: $e');
       throw Exception("Ошибка удаления из корзины: $e");
     }
   }
 
   // Получить корзину
-  Future<List<Product>> fetchCart(int userId) async {
+  Future<List<Product>> fetchCart() async {
+    if (supabase.auth.currentSession == null) {
+      throw Exception("Пользователь не аутентифицирован");
+    }
     try {
-      final response = await http.get(Uri.parse('$baseUrl/cart?user_id=$userId'));
+      final response = await http.get(
+        Uri.parse('$baseUrl/cart'),
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer $jwtToken",
+        },
+      );
+      print('Статус-код получения корзины: ${response.statusCode}');
+      print('Ответ получения корзины: ${response.body}');
       if (response.statusCode == 200) {
         List<dynamic> data = json.decode(response.body);
         return data.map((json) => Product.fromJson(json)).toList();
@@ -170,25 +259,106 @@ class ApiService {
         throw Exception("Ошибка загрузки корзины: ${response.statusCode}");
       }
     } catch (e) {
+      print('Ошибка запроса при получении корзины: $e');
       throw Exception("Ошибка загрузки корзины: $e");
     }
   }
 }
+
+/// Провайдер для аутентификации
+class AuthProvider extends ChangeNotifier {
+  final SupabaseClient supabase = Supabase.instance.client;
+  bool isAuthenticated = false;
+  String? userId;
+  String? email;
+
+  AuthProvider() {
+    _initialize();
+  }
+
+  Future<void> _initialize() async {
+    final session = supabase.auth.currentSession;
+    if (session != null) {
+      isAuthenticated = true;
+      userId = session.user?.id;
+      email = session.user?.email;
+    }
+    supabase.auth.onAuthStateChange.listen((data) {
+      final event = data.event;
+      final session = data.session;
+      if (event == AuthChangeEvent.signedIn) {
+        isAuthenticated = true;
+        userId = session?.user?.id;
+        email = session?.user?.email;
+      } else if (event == AuthChangeEvent.signedOut) {
+        isAuthenticated = false;
+        userId = null;
+        email = null;
+      }
+      notifyListeners();
+    });
+    notifyListeners();
+  }
+
+  Future<void> signUp(String email, String password) async {
+    try {
+      final response = await supabase.auth.signUp(email: email, password: password);
+      if (response.user != null) {
+        isAuthenticated = true;
+        userId = response.user?.id;
+        this.email = response.user?.email;
+        notifyListeners();
+      } else {
+        throw Exception("Не удалось зарегистрировать пользователя.");
+      }
+    } catch (e) {
+      throw Exception("Ошибка регистрации: $e");
+    }
+  }
+
+  Future<void> signIn(String email, String password) async {
+    try {
+      final response = await supabase.auth.signInWithPassword(email: email, password: password);
+      if (response.session != null) {
+        isAuthenticated = true;
+        userId = response.session?.user.id;
+        this.email = response.session?.user.email;
+        notifyListeners();
+      } else {
+        throw Exception("Не удалось войти в систему.");
+      }
+    } catch (e) {
+      throw Exception("Ошибка входа: $e");
+    }
+  }
+
+  Future<void> signOut() async {
+    await supabase.auth.signOut();
+    isAuthenticated = false;
+    userId = null;
+    email = null; *
+    notifyListeners();
+  }
+}
+
 
 /// Провайдер для корзины
 class CartProvider extends ChangeNotifier {
   final ApiService apiService = ApiService();
   List<Product> _items = [];
   double _totalPrice = 0.0;
-  final int userId = 1; // Жестко заданный userId для примера
 
   List<Product> get items => _items;
   double get totalPrice => _totalPrice;
 
+  CartProvider() {
+    loadCart();
+  }
+
   // Загрузить корзину из сервера
   Future<void> loadCart() async {
     try {
-      _items = await apiService.fetchCart(userId);
+      _items = await apiService.fetchCart();
       _totalPrice = _items.fold(0.0, (sum, item) => sum + item.price);
       notifyListeners();
     } catch (e) {
@@ -199,7 +369,7 @@ class CartProvider extends ChangeNotifier {
   // Добавить товар в корзину
   Future<void> addToCart(Product product) async {
     try {
-      await apiService.addToCart(product.productId, userId);
+      await apiService.addToCart(product.productId);
       _items.add(product);
       _totalPrice += product.price;
       notifyListeners();
@@ -211,7 +381,7 @@ class CartProvider extends ChangeNotifier {
   // Удалить товар из корзины
   Future<void> removeFromCart(Product product) async {
     try {
-      await apiService.removeFromCart(product.productId, userId);
+      await apiService.removeFromCart(product.productId);
       _items.removeWhere((item) => item.productId == product.productId);
       _totalPrice -= product.price;
       notifyListeners();
@@ -232,14 +402,17 @@ class CartProvider extends ChangeNotifier {
 class FavoritesProvider extends ChangeNotifier {
   final ApiService apiService = ApiService();
   List<Product> _favorites = [];
-  final int userId = 1; // Жестко заданный userId для примера
 
   List<Product> get favorites => _favorites;
+
+  FavoritesProvider() {
+    loadFavorites();
+  }
 
   // Загрузить избранное из сервера
   Future<void> loadFavorites() async {
     try {
-      _favorites = await apiService.fetchFavorites(userId);
+      _favorites = await apiService.fetchFavorites();
       notifyListeners();
     } catch (e) {
       print('Ошибка загрузки избранного: $e');
@@ -249,7 +422,7 @@ class FavoritesProvider extends ChangeNotifier {
   // Добавить в избранное
   Future<void> addToFavorites(Product product) async {
     try {
-      await apiService.addToFavorites(product.productId, userId);
+      await apiService.addToFavorites(product.productId);
       _favorites.add(product);
       notifyListeners();
     } catch (e) {
@@ -260,7 +433,7 @@ class FavoritesProvider extends ChangeNotifier {
   // Удалить из избранного
   Future<void> removeFromFavorites(Product product) async {
     try {
-      await apiService.removeFromFavorites(product.productId, userId);
+      await apiService.removeFromFavorites(product.productId);
       _favorites.removeWhere((item) => item.productId == product.productId);
       notifyListeners();
     } catch (e) {
@@ -273,13 +446,24 @@ class FavoritesProvider extends ChangeNotifier {
   }
 }
 
+// Глобальный ключ навигатора для доступа к контексту из провайдеров
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+
 /// Главная функция
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Supabase.initialize(
+    url: 'https://qugoviarpvhouwmlmexj.supabase.co', // Замените на ваш Project URL
+    anonKey:
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF1Z292aWFycHZob3V3bWxtZXhqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzQzNTgwOTAsImV4cCI6MjA0OTkzNDA5MH0.RpHyb39LpTPTrW3XiKGl8a_E3Xwe0h3DJaaQzPdscjI', // Замените на ваш anon public ключ
+  );
+
   runApp(
-    MultiProvider(
+    p.MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (context) => CartProvider()..loadCart()),
-        ChangeNotifierProvider(create: (context) => FavoritesProvider()..loadFavorites()),
+        p.ChangeNotifierProvider(create: (context) => AuthProvider()),
+        p.ChangeNotifierProvider(create: (context) => CartProvider()),
+        p.ChangeNotifierProvider(create: (context) => FavoritesProvider()),
       ],
       child: const MyApp(),
     ),
@@ -294,14 +478,265 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Витрина продуктов',
+      navigatorKey: navigatorKey,
       theme: ThemeData(primarySwatch: Colors.blue),
       debugShowCheckedModeBanner: false,
-      home: const HomePage(),
+      home: const ProfilePage(), // Стартовая страница
     );
   }
 }
 
-/// Главная страница
+/// Страница профиля
+class ProfilePage extends StatelessWidget {
+  const ProfilePage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final authProvider = p.Provider.of<AuthProvider>(context); // Используем алиас
+    return Scaffold(
+      appBar: AppBar(title: const Text('Профиль')),
+      body: Center(
+        child: authProvider.isAuthenticated
+            ? Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text('Вы вошли как: ${authProvider.email ?? 'Неизвестный пользователь'}'),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: () async {
+                await authProvider.signOut();
+              },
+              child: const Text('Выйти'),
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const HomePage()),
+                );
+              },
+              child: const Text('Перейти к продуктам'),
+            ),
+          ],
+        )
+            : Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            ElevatedButton(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const LoginPage()),
+                );
+              },
+              child: const Text('Войти'),
+            ),
+            const SizedBox(height: 10),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const RegisterPage()),
+                );
+              },
+              child: const Text('Зарегистрироваться'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Страница регистрации
+class RegisterPage extends StatefulWidget {
+  const RegisterPage({super.key});
+
+  @override
+  State<RegisterPage> createState() => _RegisterPageState();
+}
+
+class _RegisterPageState extends State<RegisterPage> {
+  final _formKey = GlobalKey<FormState>();
+  String email = '';
+  String password = '';
+  bool isLoading = false;
+
+  void register() async {
+    if (_formKey.currentState!.validate()) {
+      _formKey.currentState!.save();
+      setState(() {
+        isLoading = true;
+      });
+      try {
+        await p.Provider.of<AuthProvider>(context, listen: false).signUp(email, password);
+        Navigator.pop(context); // Вернуться на страницу профиля
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Ошибка регистрации: $e')),
+        );
+      } finally {
+        setState(() {
+          isLoading = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Регистрация')),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            // To prevent overflow
+            child: Column(
+              children: [
+                TextFormField(
+                  decoration: const InputDecoration(labelText: 'Email'),
+                  keyboardType: TextInputType.emailAddress,
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Введите email';
+                    }
+                    if (!RegExp(r'^[^@]+@[^@]+\.[^@]+').hasMatch(value)) {
+                      return 'Введите корректный email';
+                    }
+                    return null;
+                  },
+                  onSaved: (value) {
+                    email = value!;
+                  },
+                ),
+                TextFormField(
+                  decoration: const InputDecoration(labelText: 'Пароль'),
+                  obscureText: true,
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Введите пароль';
+                    }
+                    if (value.length < 6) {
+                      return 'Пароль должен быть не менее 6 символов';
+                    }
+                    return null;
+                  },
+                  onSaved: (value) {
+                    password = value!;
+                  },
+                ),
+                const SizedBox(height: 20),
+                ElevatedButton(
+                  onPressed: register,
+                  child: const Text('Зарегистрироваться'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Страница входа
+class LoginPage extends StatefulWidget {
+  const LoginPage({super.key});
+
+  @override
+  State<LoginPage> createState() => _LoginPageState();
+}
+
+class _LoginPageState extends State<LoginPage> {
+  final _formKey = GlobalKey<FormState>();
+  String email = '';
+  String password = '';
+  bool isLoading = false;
+
+  void login() async {
+    if (_formKey.currentState!.validate()) {
+      _formKey.currentState!.save();
+      setState(() {
+        isLoading = true;
+      });
+      try {
+        await p.Provider.of<AuthProvider>(context, listen: false).signIn(email, password);
+        Navigator.pop(context); // Вернуться на страницу профиля
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Ошибка входа: $e')),
+        );
+      } finally {
+        setState(() {
+          isLoading = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Вход')),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            // To prevent overflow
+            child: Column(
+              children: [
+                TextFormField(
+                  decoration: const InputDecoration(labelText: 'Email'),
+                  keyboardType: TextInputType.emailAddress,
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Введите email';
+                    }
+                    if (!RegExp(r'^[^@]+@[^@]+\.[^@]+').hasMatch(value)) {
+                      return 'Введите корректный email';
+                    }
+                    return null;
+                  },
+                  onSaved: (value) {
+                    email = value!;
+                  },
+                ),
+                TextFormField(
+                  decoration: const InputDecoration(labelText: 'Пароль'),
+                  obscureText: true,
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Введите пароль';
+                    }
+                    return null;
+                  },
+                  onSaved: (value) {
+                    password = value!;
+                  },
+                ),
+                const SizedBox(height: 20),
+                ElevatedButton(
+                  onPressed: login,
+                  child: const Text('Войти'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Главная страница с продуктами
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
 
@@ -328,7 +763,7 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    final favoritesProvider = Provider.of<FavoritesProvider>(context);
+    final favoritesProvider = p.Provider.of<FavoritesProvider>(context);
     return Scaffold(
       appBar: AppBar(
         title: const Text('Витрина продуктов'),
@@ -393,7 +828,7 @@ class _HomePageState extends State<HomePage> {
                         },
                       ),
                       // Цена
-                      Text('${double.tryParse(product.price.toString()) ?? 0.0} ₽'),
+                      Text('${product.price.toStringAsFixed(2)} ₽'),
                       // Кнопка удаления товара
                       IconButton(
                         icon: const Icon(Icons.delete, color: Colors.red),
@@ -449,7 +884,6 @@ class _HomePageState extends State<HomePage> {
                       MaterialPageRoute(
                         builder: (context) => ProductDetailsPage(
                           product: product,
-                          userId: favoritesProvider.userId,
                         ),
                       ),
                     ).then((_) {
@@ -471,7 +905,7 @@ class _HomePageState extends State<HomePage> {
             MaterialPageRoute(builder: (context) => const CreateProductPage()),
           ).then((_) {
             refreshProducts();
-            final favoritesProvider = Provider.of<FavoritesProvider>(context, listen: false);
+            final favoritesProvider = p.Provider.of<FavoritesProvider>(context, listen: false);
             favoritesProvider.loadFavorites();
           });
         },
@@ -483,9 +917,8 @@ class _HomePageState extends State<HomePage> {
 /// Страница деталей продукта
 class ProductDetailsPage extends StatefulWidget {
   final Product product;
-  final int userId;
 
-  const ProductDetailsPage({super.key, required this.product, required this.userId});
+  const ProductDetailsPage({super.key, required this.product});
 
   @override
   State<ProductDetailsPage> createState() => _ProductDetailsPageState();
@@ -503,7 +936,7 @@ class _ProductDetailsPageState extends State<ProductDetailsPage> {
   }
 
   void checkFavorite() {
-    final favoritesProvider = Provider.of<FavoritesProvider>(context, listen: false);
+    final favoritesProvider = p.Provider.of<FavoritesProvider>(context, listen: false);
     setState(() {
       isFavorite = favoritesProvider.isFavorite(widget.product.productId);
     });
@@ -513,7 +946,7 @@ class _ProductDetailsPageState extends State<ProductDetailsPage> {
     setState(() {
       isLoading = true;
     });
-    final favoritesProvider = Provider.of<FavoritesProvider>(context, listen: false);
+    final favoritesProvider = p.Provider.of<FavoritesProvider>(context, listen: false);
     try {
       if (isFavorite) {
         await favoritesProvider.removeFromFavorites(widget.product);
@@ -538,7 +971,7 @@ class _ProductDetailsPageState extends State<ProductDetailsPage> {
   }
 
   void addToCart() async {
-    final cartProvider = Provider.of<CartProvider>(context, listen: false);
+    final cartProvider = p.Provider.of<CartProvider>(context, listen: false);
     try {
       await cartProvider.addToCart(widget.product);
       ScaffoldMessenger.of(context).showSnackBar(
@@ -572,7 +1005,8 @@ class _ProductDetailsPageState extends State<ProductDetailsPage> {
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
-        child: SingleChildScrollView( // To prevent overflow
+        child: SingleChildScrollView(
+          // To prevent overflow
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -596,7 +1030,7 @@ class _ProductDetailsPageState extends State<ProductDetailsPage> {
               Text(widget.product.description),
               const SizedBox(height: 16),
               Text(
-                'Цена: ${double.tryParse(widget.product.price.toString()) ?? 0.0} ₽',
+                'Цена: ${widget.product.price.toStringAsFixed(2)} ₽',
                 style: const TextStyle(fontSize: 20, color: Colors.green),
               ),
               const SizedBox(height: 16),
@@ -619,7 +1053,7 @@ class CartPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cartProvider = Provider.of<CartProvider>(context);
+    final cartProvider = p.Provider.of<CartProvider>(context);
     final cartItems = cartProvider.items;
     return Scaffold(
       appBar: AppBar(title: const Text('Корзина')),
@@ -634,7 +1068,7 @@ class CartPage extends StatelessWidget {
                 final product = cartItems[index];
                 return ListTile(
                   title: Text(product.name),
-                  subtitle: Text('${double.tryParse(product.price.toString()) ?? 0.0} ₽'),
+                  subtitle: Text('${product.price.toStringAsFixed(2)} ₽'),
                   trailing: IconButton(
                     icon: const Icon(Icons.delete, color: Colors.red),
                     onPressed: () async {
@@ -690,7 +1124,7 @@ class FavoritesPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final favoritesProvider = Provider.of<FavoritesProvider>(context);
+    final favoritesProvider = p.Provider.of<FavoritesProvider>(context);
     final favorites = favoritesProvider.favorites;
     return Scaffold(
       appBar: AppBar(title: const Text('Избранное')),
@@ -725,7 +1159,7 @@ class FavoritesPage extends StatelessWidget {
                     },
                   ),
                   // Цена
-                  Text('${double.tryParse(product.price.toString()) ?? 0.0} ₽'),
+                  Text('${product.price.toStringAsFixed(2)} ₽'),
                 ],
               ),
               leading: product.imageUrl.isNotEmpty
@@ -745,7 +1179,6 @@ class FavoritesPage extends StatelessWidget {
                   MaterialPageRoute(
                     builder: (context) => ProductDetailsPage(
                       product: product,
-                      userId: favoritesProvider.userId,
                     ),
                   ),
                 ).then((_) {
@@ -823,6 +1256,7 @@ class _CreateProductPageState extends State<CreateProductPage> {
               : Form(
             key: _formKey,
             child: SingleChildScrollView(
+              // To prevent overflow
               child: Column(
                 children: [
                   TextFormField(
