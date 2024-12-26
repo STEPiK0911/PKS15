@@ -1,13 +1,13 @@
 {
   "project_info": {
-    "project_number": "999364101774",
-    "project_id": "flut-35b5b",
-    "storage_bucket": "flut-35b5b.firebasestorage.app"
+    "project_number": "525031112671",
+    "project_id": "fluuuu-f1208",
+    "storage_bucket": "fluuuu-f1208.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:999364101774:android:af0038e21a00c35e7cabdf",
+        "mobilesdk_app_id": "1:525031112671:android:64a8aa8192db62079ace6a",
         "android_client_info": {
           "package_name": "com.example.my_flutter_app"
         }
@@ -15,7 +15,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyAafmLk0GjTlDgJQLkRE1rpOBD13iJlOas"
+          "current_key": "AIzaSyB-Ql2Uaz-WcNb294XQgwiLM7xEBemOmyY"
         }
       ],
       "services": {

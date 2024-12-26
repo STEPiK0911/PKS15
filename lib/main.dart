@@ -1,10 +1,31 @@
+// lib/main.dart
+
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart' as p; // Алиас для provider
-import 'package:http/http.dart' as http;
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
-/// Модель данных продукта
+// ---------------------- Модели ----------------------
+
+// Модель пользователя
+class UserModel {
+  final String email;
+  final String password;
+
+  UserModel({required this.email, required this.password});
+
+  factory UserModel.fromJson(Map<String, dynamic> json) => UserModel(
+    email: json['email'],
+    password: json['password'],
+  );
+
+  Map<String, dynamic> toJson() => {
+    'email': email,
+    'password': password,
+  };
+}
+
+// Модель продукта
 class Product {
   final int productId;
   final String name;
@@ -22,20 +43,26 @@ class Product {
     required this.imageUrl,
   });
 
-  factory Product.fromJson(Map<String, dynamic> json) {
-    return Product(
-      productId: json['product_id'],
-      name: json['name'],
-      description: json['description'] ?? '',
-      price: (json['price'] as num).toDouble(),
-      stock: json['stock'],
-      imageUrl: json['image_url'] ?? '',
-    );
-  }
+  factory Product.fromJson(Map<String, dynamic> json) => Product(
+    productId: json['productId'],
+    name: json['name'],
+    description: json['description'],
+    price: json['price'].toDouble(),
+    stock: json['stock'],
+    imageUrl: json['image_url'],
+  );
+
+  Map<String, dynamic> toJson() => {
+    'productId': productId,
+    'name': name,
+    'description': description,
+    'price': price,
+    'stock': stock,
+    'image_url': imageUrl,
+  };
 }
 
-
-
+// Модель заказа
 class Order {
   final String productName;
   final double price;
@@ -46,399 +73,169 @@ class Order {
     required this.price,
     this.status = 'В обработке',
   });
+
+  factory Order.fromJson(Map<String, dynamic> json) => Order(
+    productName: json['productName'],
+    price: json['price'].toDouble(),
+    status: json['status'],
+  );
+
+  Map<String, dynamic> toJson() => {
+    'productName': productName,
+    'price': price,
+    'status': status,
+  };
 }
 
-class OrdersProvider extends ChangeNotifier {
-  final List<Order> _orders = [];
+// Модель сообщения
+class Message {
+  final String sender;
+  final String content;
+  final DateTime timestamp;
 
-  List<Order> get orders => List.unmodifiable(_orders);
+  Message({
+    required this.sender,
+    required this.content,
+    required this.timestamp,
+  });
 
-  void addOrder(String productName, double price) {
-    _orders.add(Order(productName: productName, price: price));
-    notifyListeners();
-  }
+  factory Message.fromJson(Map<String, dynamic> json) => Message(
+    sender: json['sender'],
+    content: json['content'],
+    timestamp: DateTime.parse(json['timestamp']),
+  );
+
+  Map<String, dynamic> toJson() => {
+    'sender': sender,
+    'content': content,
+    'timestamp': timestamp.toIso8601String(),
+  };
 }
 
-/// API сервис для взаимодействия с сервером
-class ApiService {
-  final String baseUrl = 'http://10.0.2.2:8080'; // Измените на ваш URL сервера
-  final SupabaseClient supabase = Supabase.instance.client;
+// ---------------------- Провайдеры ----------------------
 
-  // Получить текущий JWT токен
-  String? get jwtToken => supabase.auth.currentSession?.accessToken;
-
-
-
-  // Получить все продукты
-  Future<List<Product>> fetchProducts() async {
-    try {
-      final response = await http.get(
-        Uri.parse('$baseUrl/products'),
-        headers: {
-          "Content-Type": "application/json",
-          if (jwtToken != null) "Authorization": "Bearer $jwtToken",
-        },
-      );
-      print('Статус-код: ${response.statusCode}');
-      print('Ответ: ${response.body}');
-      if (response.statusCode == 200) {
-        List<dynamic> data = json.decode(response.body);
-        return data.map((json) => Product.fromJson(json)).toList();
-      } else {
-        throw Exception("Ошибка загрузки данных: ${response.statusCode}");
-      }
-    } catch (e) {
-      print('Ошибка запроса: $e');
-      throw Exception("Ошибка загрузки данных");
-    }
-  }
-
-  // Создать продукт
-  Future<void> createProduct(Map<String, dynamic> productData) async {
-    try {
-      final response = await http.post(
-        Uri.parse("$baseUrl/products/create"),
-        headers: {
-          "Content-Type": "application/json",
-          if (jwtToken != null) "Authorization": "Bearer $jwtToken",
-        },
-        body: json.encode(productData),
-      );
-      print('Статус-код создания: ${response.statusCode}');
-      print('Ответ создания: ${response.body}');
-      if (response.statusCode != 201) {
-        throw Exception("Ошибка создания продукта: ${response.statusCode}");
-      }
-    } catch (e) {
-      print('Ошибка запроса при создании: $e');
-      throw Exception("Ошибка создания продукта: $e");
-    }
-  }
-
-  // Удалить продукт
-  Future<void> deleteProduct(int productId) async {
-    try {
-      final response = await http.delete(
-        Uri.parse('$baseUrl/products/delete/$productId'),
-        headers: {
-          if (jwtToken != null) "Authorization": "Bearer $jwtToken",
-        },
-      );
-      print('Статус-код удаления: ${response.statusCode}');
-      print('Ответ удаления: ${response.body}');
-      if (response.statusCode != 200) {
-        throw Exception("Ошибка удаления продукта: ${response.statusCode}");
-      }
-    } catch (e) {
-      print('Ошибка запроса при удалении: $e');
-      throw Exception("Ошибка удаления продукта: $e");
-    }
-  }
-
-  /* ----------------------- Функционал Избранного (Favorites) ----------------------- */
-
-  // Добавить в избранное
-  Future<void> addToFavorites(int productId) async {
-    if (supabase.auth.currentSession == null) {
-      throw Exception("Пользователь не аутентифицирован");
-    }
-    try {
-      final response = await http.post(
-        Uri.parse('$baseUrl/favorites/add'),
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": "Bearer $jwtToken",
-        },
-        body: json.encode({"product_id": productId}),
-      );
-      print('Статус-код добавления в избранное: ${response.statusCode}');
-      print('Ответ добавления в избранное: ${response.body}');
-      if (response.statusCode != 200) {
-        throw Exception("Ошибка добавления в избранное: ${response.statusCode}");
-      }
-    } catch (e) {
-      print('Ошибка запроса при добавлении в избранное: $e');
-      throw Exception("Ошибка добавления в избранное: $e");
-    }
-  }
-
-  // Удалить из избранного
-  Future<void> removeFromFavorites(int productId) async {
-    if (supabase.auth.currentSession == null) {
-      throw Exception("Пользователь не аутентифицирован");
-    }
-    try {
-      final response = await http.delete(
-        Uri.parse('$baseUrl/favorites/remove/$productId'),
-        headers: {
-          "Authorization": "Bearer $jwtToken",
-        },
-      );
-      print('Статус-код удаления из избранного: ${response.statusCode}');
-      print('Ответ удаления из избранного: ${response.body}');
-      if (response.statusCode != 200) {
-        throw Exception("Ошибка удаления из избранного: ${response.statusCode}");
-      }
-    } catch (e) {
-      print('Ошибка запроса при удалении из избранного: $e');
-      throw Exception("Ошибка удаления из избранного: $e");
-    }
-  }
-
-  // Получить избранные товары
-  Future<List<Product>> fetchFavorites() async {
-    if (supabase.auth.currentSession == null) {
-      throw Exception("Пользователь не аутентифицирован");
-    }
-    try {
-      final response = await http.get(
-        Uri.parse('$baseUrl/favorites'),
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": "Bearer $jwtToken",
-        },
-      );
-      print('Статус-код получения избранного: ${response.statusCode}');
-      print('Ответ получения избранного: ${response.body}');
-      if (response.statusCode == 200) {
-        List<dynamic> data = json.decode(response.body);
-        return data.map((json) => Product.fromJson(json)).toList();
-      } else {
-        throw Exception("Ошибка загрузки избранных товаров: ${response.statusCode}");
-      }
-    } catch (e) {
-      print('Ошибка запроса при получении избранного: $e');
-      throw Exception("Ошибка загрузки избранных товаров: $e");
-    }
-  }
-
-  /* ----------------------- Функционал Корзины (Cart) ----------------------- */
-
-  // Добавить в корзину
-  Future<void> addToCart(int productId) async {
-    if (supabase.auth.currentSession == null) {
-      throw Exception("Пользователь не аутентифицирован");
-    }
-    try {
-      final response = await http.post(
-        Uri.parse('$baseUrl/cart/add'),
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": "Bearer $jwtToken",
-        },
-        body: json.encode({"product_id": productId}),
-      );
-      print('Статус-код добавления в корзину: ${response.statusCode}');
-      print('Ответ добавления в корзину: ${response.body}');
-      if (response.statusCode != 200) {
-        throw Exception("Ошибка добавления в корзину: ${response.statusCode}");
-      }
-    } catch (e) {
-      print('Ошибка запроса при добавлении в корзину: $e');
-      throw Exception("Ошибка добавления в корзину: $e");
-    }
-  }
-
-  // Удалить из корзины
-  Future<void> removeFromCart(int productId) async {
-    if (supabase.auth.currentSession == null) {
-      throw Exception("Пользователь не аутентифицирован");
-    }
-    try {
-      final response = await http.delete(
-        Uri.parse('$baseUrl/cart/remove/$productId'),
-        headers: {
-          "Authorization": "Bearer $jwtToken",
-        },
-      );
-      print('Статус-код удаления из корзины: ${response.statusCode}');
-      print('Ответ удаления из корзины: ${response.body}');
-      if (response.statusCode != 200) {
-        throw Exception("Ошибка удаления из корзины: ${response.statusCode}");
-      }
-    } catch (e) {
-      print('Ошибка запроса при удалении из корзины: $e');
-      throw Exception("Ошибка удаления из корзины: $e");
-    }
-  }
-
-  // Получить корзину
-  Future<List<Product>> fetchCart() async {
-    if (supabase.auth.currentSession == null) {
-      throw Exception("Пользователь не аутентифицирован");
-    }
-    try {
-      final response = await http.get(
-        Uri.parse('$baseUrl/cart'),
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": "Bearer $jwtToken",
-        },
-      );
-      print('Статус-код получения корзины: ${response.statusCode}');
-      print('Ответ получения корзины: ${response.body}');
-      if (response.statusCode == 200) {
-        List<dynamic> data = json.decode(response.body);
-        return data.map((json) => Product.fromJson(json)).toList();
-      } else {
-        throw Exception("Ошибка загрузки корзины: ${response.statusCode}");
-      }
-    } catch (e) {
-      print('Ошибка запроса при получении корзины: $e');
-      throw Exception("Ошибка загрузки корзины: $e");
-    }
-  }
-}
-
-/// Провайдер для аутентификации
 class AuthProvider extends ChangeNotifier {
-  final SupabaseClient supabase = Supabase.instance.client;
   bool isAuthenticated = false;
-  String? userId;
-  String? email;
+  String? userEmail;
+  List<UserModel> _users = [];
 
   AuthProvider() {
-    _initialize();
+    _loadUsers();
+    _checkAuthentication();
   }
 
-  Future<void> _initialize() async {
-    final session = supabase.auth.currentSession;
-    if (session != null) {
-      isAuthenticated = true;
-      userId = session.user?.id;
-      email = session.user?.email;
+  Future<void> _loadUsers() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String? usersData = prefs.getString('users');
+    if (usersData != null) {
+      List<dynamic> usersJson = json.decode(usersData);
+      _users = usersJson.map((json) => UserModel.fromJson(json)).toList();
     }
-    supabase.auth.onAuthStateChange.listen((data) {
-      final event = data.event;
-      final session = data.session;
-      if (event == AuthChangeEvent.signedIn) {
-        isAuthenticated = true;
-        userId = session?.user?.id;
-        email = session?.user?.email;
-      } else if (event == AuthChangeEvent.signedOut) {
-        isAuthenticated = false;
-        userId = null;
-        email = null;
-      }
+  }
+
+  Future<void> _saveUsers() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    List<Map<String, dynamic>> usersJson =
+    _users.map((user) => user.toJson()).toList();
+    prefs.setString('users', json.encode(usersJson));
+  }
+
+  Future<void> _checkAuthentication() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String? email = prefs.getString('currentUserEmail');
+    if (email != null) {
+      isAuthenticated = true;
+      userEmail = email;
       notifyListeners();
-    });
-    notifyListeners();
+    }
   }
 
   Future<void> signUp(String email, String password) async {
-    try {
-      final response = await supabase.auth.signUp(email: email, password: password);
-      if (response.user != null) {
-        isAuthenticated = true;
-        userId = response.user?.id;
-        this.email = response.user?.email;
-        notifyListeners();
-      } else {
-        throw Exception("Не удалось зарегистрировать пользователя.");
-      }
-    } catch (e) {
-      throw Exception("Ошибка регистрации: $e");
+    // Проверка, существует ли уже пользователь
+    bool userExists = _users.any(
+            (user) => user.email.toLowerCase() == email.toLowerCase());
+    if (userExists) {
+      throw Exception("Пользователь с таким email уже существует.");
     }
+
+    // Создание нового пользователя
+    UserModel newUser = UserModel(email: email, password: password);
+    _users.add(newUser);
+    await _saveUsers();
+
+    // Установка текущего пользователя
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    prefs.setString('currentUserEmail', email);
+    isAuthenticated = true;
+    userEmail = email;
+    notifyListeners();
   }
 
   Future<void> signIn(String email, String password) async {
+    // Поиск пользователя
     try {
-      final response = await supabase.auth.signInWithPassword(email: email, password: password);
-      if (response.session != null) {
-        isAuthenticated = true;
-        userId = response.session?.user.id;
-        this.email = response.session?.user.email;
-        notifyListeners();
-      } else {
-        throw Exception("Не удалось войти в систему.");
-      }
+      UserModel user = _users.firstWhere((user) =>
+      user.email.toLowerCase() == email.toLowerCase() &&
+          user.password == password);
+      // Установка текущего пользователя
+      SharedPreferences prefs = await SharedPreferences.getInstance();
+      prefs.setString('currentUserEmail', email);
+      isAuthenticated = true;
+      userEmail = email;
+      notifyListeners();
     } catch (e) {
-      throw Exception("Ошибка входа: $e");
+      throw Exception("Неверный email или пароль.");
     }
   }
 
   Future<void> signOut() async {
-    await supabase.auth.signOut();
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    prefs.remove('currentUserEmail');
     isAuthenticated = false;
-    userId = null;
-    email = null;
+    userEmail = null;
     notifyListeners();
   }
 }
 
-
-/// Провайдер для корзины
-class CartProvider extends ChangeNotifier {
-  List<Product> _items = []; // Локальный список товаров
-  double _totalPrice = 0.0; // Общая стоимость товаров
-
-  List<Product> get items => _items;
-  double get totalPrice => _totalPrice;
-
-  // Добавление товара в корзину
-  void addToCart(Product product) {
-    _items.add(product);
-    _totalPrice += product.price;
-    notifyListeners();
-  }
-
-  // Удаление товара из корзины
-  void removeFromCart(Product product) {
-    _items.remove(product);
-    _totalPrice -= product.price;
-    notifyListeners();
-  }
-
-  // Очистка корзины
-  void clearCart() {
-    _items.clear();
-    _totalPrice = 0.0;
-    notifyListeners();
-  }
-}
-
-
-/// Провайдер для избранного
 class FavoritesProvider extends ChangeNotifier {
-  final ApiService apiService = ApiService();
   List<Product> _favorites = [];
 
-  List<Product> get favorites => _favorites;
+  List<Product> get favorites => List.unmodifiable(_favorites);
 
   FavoritesProvider() {
     loadFavorites();
   }
 
-  // Загрузить избранное из сервера
   Future<void> loadFavorites() async {
-    try {
-      _favorites = await apiService.fetchFavorites();
-      notifyListeners();
-    } catch (e) {
-      print('Ошибка загрузки избранного: $e');
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String? favoritesData = prefs.getString('favorites');
+    if (favoritesData != null) {
+      List<dynamic> favoritesJson = json.decode(favoritesData);
+      _favorites =
+          favoritesJson.map((json) => Product.fromJson(json)).toList();
     }
+    notifyListeners();
   }
 
-  // Добавить в избранное
+  Future<void> _saveFavorites() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    List<Map<String, dynamic>> favoritesJson =
+    _favorites.map((product) => product.toJson()).toList();
+    prefs.setString('favorites', json.encode(favoritesJson));
+  }
+
   Future<void> addToFavorites(Product product) async {
-    try {
-      await apiService.addToFavorites(product.productId);
+    if (!_favorites.any((item) => item.productId == product.productId)) {
       _favorites.add(product);
+      await _saveFavorites();
       notifyListeners();
-    } catch (e) {
-      print('Ошибка добавления в избранное: $e');
     }
   }
 
-  // Удалить из избранного
   Future<void> removeFromFavorites(Product product) async {
-    try {
-      await apiService.removeFromFavorites(product.productId);
-      _favorites.removeWhere((item) => item.productId == product.productId);
-      notifyListeners();
-    } catch (e) {
-      print('Ошибка удаления из избранного: $e');
-    }
+    _favorites.removeWhere((item) => item.productId == product.productId);
+    await _saveFavorites();
+    notifyListeners();
   }
 
   bool isFavorite(int productId) {
@@ -446,67 +243,192 @@ class FavoritesProvider extends ChangeNotifier {
   }
 }
 
-// Глобальный ключ навигатора для доступа к контексту из провайдеров
-final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+class CartProvider extends ChangeNotifier {
+  List<Product> _items = [];
+  double _totalPrice = 0.0;
 
-/// Главная функция
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  await Supabase.initialize(
-    url: 'https://qugoviarpvhouwmlmexj.supabase.co', // Замените на ваш Project URL
-    anonKey:
-    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF1Z292aWFycHZob3V3bWxtZXhqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzQzNTgwOTAsImV4cCI6MjA0OTkzNDA5MH0.RpHyb39LpTPTrW3XiKGl8a_E3Xwe0h3DJaaQzPdscjI', // Замените на ваш anon public ключ
-  );
+  List<Product> get items => List.unmodifiable(_items);
+  double get totalPrice => _totalPrice;
 
+  CartProvider() {
+    loadCart();
+  }
+
+  Future<void> loadCart() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String? cartData = prefs.getString('cart');
+    if (cartData != null) {
+      List<dynamic> cartJson = json.decode(cartData);
+      _items = cartJson.map((json) => Product.fromJson(json)).toList();
+      _totalPrice = _items.fold(0.0, (sum, item) => sum + item.price);
+    }
+    notifyListeners();
+  }
+
+  Future<void> _saveCart() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    List<Map<String, dynamic>> cartJson =
+    _items.map((product) => product.toJson()).toList();
+    prefs.setString('cart', json.encode(cartJson));
+  }
+
+  Future<void> addToCart(Product product) async {
+    _items.add(product);
+    _totalPrice += product.price;
+    await _saveCart();
+    notifyListeners();
+  }
+
+  Future<void> removeFromCart(Product product) async {
+    _items.remove(product);
+    _totalPrice -= product.price;
+    await _saveCart();
+    notifyListeners();
+  }
+
+  Future<void> clearCart() async {
+    _items.clear();
+    _totalPrice = 0.0;
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    prefs.remove('cart');
+    notifyListeners();
+  }
+}
+
+class OrdersProvider extends ChangeNotifier {
+  List<Order> _orders = [];
+
+  List<Order> get orders => List.unmodifiable(_orders);
+
+  OrdersProvider() {
+    loadOrders();
+  }
+
+  Future<void> loadOrders() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String? ordersData = prefs.getString('orders');
+    if (ordersData != null) {
+      List<dynamic> ordersJson = json.decode(ordersData);
+      _orders = ordersJson.map((json) => Order.fromJson(json)).toList();
+    }
+    notifyListeners();
+  }
+
+  Future<void> _saveOrders() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    List<Map<String, dynamic>> ordersJson =
+    _orders.map((order) => order.toJson()).toList();
+    prefs.setString('orders', json.encode(ordersJson));
+  }
+
+  Future<void> addOrder(String productName, double price) async {
+    Order newOrder = Order(productName: productName, price: price);
+    _orders.add(newOrder);
+    await _saveOrders();
+    notifyListeners();
+  }
+}
+
+class ChatProvider extends ChangeNotifier {
+  List<Message> _messages = [];
+
+  List<Message> get messages => List.unmodifiable(_messages);
+
+  ChatProvider() {
+    loadMessages();
+  }
+
+  Future<void> loadMessages() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String? messagesData = prefs.getString('messages');
+    if (messagesData != null) {
+      List<dynamic> messagesJson = json.decode(messagesData);
+      _messages = messagesJson.map((json) => Message.fromJson(json)).toList();
+    }
+    notifyListeners();
+  }
+
+  Future<void> _saveMessages() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    List<Map<String, dynamic>> messagesJson =
+    _messages.map((msg) => msg.toJson()).toList();
+    prefs.setString('messages', json.encode(messagesJson));
+  }
+
+  Future<void> addMessage(Message message) async {
+    _messages.add(message);
+    await _saveMessages();
+    notifyListeners();
+  }
+
+  Future<void> clearMessages() async {
+    _messages.clear();
+    notifyListeners();
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    prefs.remove('messages');
+  }
+}
+
+// ---------------------- Сервис API ----------------------
+
+class ApiService {
+  // Симуляция сети для демонстрации. В реальном приложении замените на реальные HTTP запросы.
+  Future<List<Product>> fetchProducts() async {
+    await Future.delayed(const Duration(seconds: 2)); // Симуляция задержки
+    // Пример данных
+    List<Product> products = [
+      Product(
+        productId: 1,
+        name: 'Товар 1',
+        description: 'Описание товара 1',
+        price: 100.0,
+        stock: 10,
+        imageUrl: 'assets/images/product1.png',
+      ),
+      Product(
+        productId: 2,
+        name: 'Товар 2',
+        description: 'Описание товара 2',
+        price: 200.0,
+        stock: 5,
+        imageUrl: 'assets/images/product2.png',
+      ),
+      // Добавьте больше продуктов по необходимости
+    ];
+    return products;
+  }
+
+  Future<void> deleteProduct(int productId) async {
+    await Future.delayed(const Duration(seconds: 1)); // Симуляция задержки
+    // В реальном приложении выполните HTTP DELETE запрос к вашему серверу
+    // Здесь мы ничего не делаем, так как это симуляция
+  }
+
+  Future<void> createProduct(Map<String, dynamic> productData) async {
+    await Future.delayed(const Duration(seconds: 1)); // Симуляция задержки
+    // В реальном приложении выполните HTTP POST запрос к вашему серверу
+    // Здесь мы ничего не делаем, так как это симуляция
+  }
+}
+
+// ---------------------- Основная Функция и Виджеты ----------------------
+
+void main() {
   runApp(
-    p.MultiProvider(
+    MultiProvider(
       providers: [
-        p.ChangeNotifierProvider(create: (context) => AuthProvider()),
-        p.ChangeNotifierProvider(create: (context) => CartProvider()),
-        p.ChangeNotifierProvider(create: (context) => FavoritesProvider()),
-        p.ChangeNotifierProvider(create: (_) => OrdersProvider()), // Добавляем
-
+        ChangeNotifierProvider(create: (context) => AuthProvider()),
+        ChangeNotifierProvider(create: (context) => CartProvider()),
+        ChangeNotifierProvider(create: (context) => FavoritesProvider()),
+        ChangeNotifierProvider(create: (context) => OrdersProvider()),
+        ChangeNotifierProvider(create: (context) => ChatProvider()), // Добавление ChatProvider
+        Provider(create: (context) => ApiService()), // Добавление ApiService
       ],
       child: const MyApp(),
     ),
   );
 }
 
-
-class OrdersPage extends StatelessWidget {
-  const OrdersPage({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final ordersProvider = p.Provider.of<OrdersProvider>(context);
-    final orders = ordersProvider.orders;
-
-    return Scaffold(
-      appBar: AppBar(title: const Text('Мои заказы')),
-      body: orders.isEmpty
-          ? const Center(child: Text('У вас пока нет заказов'))
-          : ListView.builder(
-        itemCount: orders.length,
-        itemBuilder: (context, index) {
-          final order = orders[index];
-          return Card(
-            margin: const EdgeInsets.all(8.0),
-            child: ListTile(
-              title: Text(order.productName),
-              subtitle: Text(
-                'Статус: ${order.status}\nЦена: ${order.price.toStringAsFixed(2)} ₽',
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-}
-
-
-
-/// Главный виджет приложения
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
@@ -514,7 +436,6 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Витрина продуктов',
-      navigatorKey: navigatorKey,
       theme: ThemeData(primarySwatch: Colors.blue),
       debugShowCheckedModeBanner: false,
       home: const ProfilePage(), // Стартовая страница
@@ -522,23 +443,47 @@ class MyApp extends StatelessWidget {
   }
 }
 
-/// Страница профиля
 class ProfilePage extends StatelessWidget {
   const ProfilePage({super.key});
 
   @override
   Widget build(BuildContext context) {
+    final authProvider = Provider.of<AuthProvider>(context);
     return Scaffold(
-      appBar: AppBar(title: const Text('Профиль')),
+      appBar: AppBar(
+        title: const Text('Профиль'),
+        actions: [
+          if (authProvider.isAuthenticated)
+            IconButton(
+              icon: const Icon(Icons.logout),
+              onPressed: () async {
+                await authProvider.signOut();
+              },
+            )
+          else
+            IconButton(
+              icon: const Icon(Icons.login),
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const LoginPage()),
+                );
+              },
+            ),
+        ],
+      ),
       body: Center(
-        child: Column(
+        child: authProvider.isAuthenticated
+            ? Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
+            Text('Добро пожаловать, ${authProvider.userEmail}!'),
+            const SizedBox(height: 20),
             ElevatedButton(
               onPressed: () {
                 Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (context) => const HomePage()), // Переход в каталог
+                  MaterialPageRoute(builder: (context) => const HomePage()),
                 );
               },
               child: const Text('Каталог продуктов'),
@@ -548,7 +493,7 @@ class ProfilePage extends StatelessWidget {
               onPressed: () {
                 Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (context) => const CartPage()), // Переход в корзину
+                  MaterialPageRoute(builder: (context) => const CartPage()),
                 );
               },
               child: const Text('Корзина'),
@@ -558,10 +503,46 @@ class ProfilePage extends StatelessWidget {
               onPressed: () {
                 Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (context) => const OrdersPage()), // Переход в заказы
+                  MaterialPageRoute(builder: (context) => const OrdersPage()),
                 );
               },
               child: const Text('Мои заказы'),
+            ),
+            const SizedBox(height: 10),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const LocalChatPage()),
+                );
+              },
+              child: const Text('Чат'),
+            ),
+          ],
+        )
+            : Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Text('Вы не вошли в систему.'),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const RegisterPage()),
+                );
+              },
+              child: const Text('Зарегистрироваться'),
+            ),
+            const SizedBox(height: 10),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const LoginPage()),
+                );
+              },
+              child: const Text('Войти'),
             ),
           ],
         ),
@@ -570,9 +551,6 @@ class ProfilePage extends StatelessWidget {
   }
 }
 
-
-
-/// Страница регистрации
 class RegisterPage extends StatefulWidget {
   const RegisterPage({super.key});
 
@@ -593,7 +571,8 @@ class _RegisterPageState extends State<RegisterPage> {
         isLoading = true;
       });
       try {
-        await p.Provider.of<AuthProvider>(context, listen: false).signUp(email, password);
+        await Provider.of<AuthProvider>(context, listen: false)
+            .signUp(email, password);
         Navigator.pop(context); // Вернуться на страницу профиля
       } catch (e) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -610,64 +589,67 @@ class _RegisterPageState extends State<RegisterPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Регистрация')),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: isLoading
-            ? const Center(child: CircularProgressIndicator())
-            : Form(
-          key: _formKey,
-          child: SingleChildScrollView(
-            // To prevent overflow
-            child: Column(
-              children: [
-                TextFormField(
-                  decoration: const InputDecoration(labelText: 'Email'),
-                  keyboardType: TextInputType.emailAddress,
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Введите email';
-                    }
-                    if (!RegExp(r'^[^@]+@[^@]+\.[^@]+').hasMatch(value)) {
-                      return 'Введите корректный email';
-                    }
-                    return null;
-                  },
-                  onSaved: (value) {
-                    email = value!;
-                  },
-                ),
-                TextFormField(
-                  decoration: const InputDecoration(labelText: 'Пароль'),
-                  obscureText: true,
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Введите пароль';
-                    }
-                    if (value.length < 6) {
-                      return 'Пароль должен быть не менее 6 символов';
-                    }
-                    return null;
-                  },
-                  onSaved: (value) {
-                    password = value!;
-                  },
-                ),
-                const SizedBox(height: 20),
-                ElevatedButton(
-                  onPressed: register,
-                  child: const Text('Зарегистрироваться'),
-                ),
-              ],
+        appBar: AppBar(
+          title: const Text('Регистрация'),
+        ),
+        body: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: isLoading
+              ? const Center(child: CircularProgressIndicator())
+              : Form(
+            key: _formKey,
+            child: SingleChildScrollView(
+              // To prevent overflow
+              child: Column(
+                children: [
+                  TextFormField(
+                    decoration:
+                    const InputDecoration(labelText: 'Email'),
+                    keyboardType: TextInputType.emailAddress,
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Введите email';
+                      }
+                      if (!RegExp(r'^[^@]+@[^@]+\.[^@]+')
+                          .hasMatch(value)) {
+                        return 'Введите корректный email';
+                      }
+                      return null;
+                    },
+                    onSaved: (value) {
+                      email = value!;
+                    },
+                  ),
+                  TextFormField(
+                    decoration:
+                    const InputDecoration(labelText: 'Пароль'),
+                    obscureText: true,
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Введите пароль';
+                      }
+                      if (value.length < 6) {
+                        return 'Пароль должен быть не менее 6 символов';
+                      }
+                      return null;
+                    },
+                    onSaved: (value) {
+                      password = value!;
+                    },
+                  ),
+                  const SizedBox(height: 20),
+                  ElevatedButton(
+                    onPressed: register,
+                    child: const Text('Зарегистрироваться'),
+                  ),
+                ],
+              ),
             ),
           ),
-        ),
-      ),
-    );
+        ));
   }
 }
 
-/// Страница входа
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
 
@@ -688,7 +670,8 @@ class _LoginPageState extends State<LoginPage> {
         isLoading = true;
       });
       try {
-        await p.Provider.of<AuthProvider>(context, listen: false).signIn(email, password);
+        await Provider.of<AuthProvider>(context, listen: false)
+            .signIn(email, password);
         Navigator.pop(context); // Вернуться на страницу профиля
       } catch (e) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -705,62 +688,64 @@ class _LoginPageState extends State<LoginPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Вход')),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: isLoading
-            ? const Center(child: CircularProgressIndicator())
-            : Form(
-          key: _formKey,
-          child: SingleChildScrollView(
-            // To prevent overflow
-            child: Column(
-              children: [
-                TextFormField(
-                  decoration: const InputDecoration(labelText: 'Email'),
-                  keyboardType: TextInputType.emailAddress,
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Введите email';
-                    }
-                    if (!RegExp(r'^[^@]+@[^@]+\.[^@]+').hasMatch(value)) {
-                      return 'Введите корректный email';
-                    }
-                    return null;
-                  },
-                  onSaved: (value) {
-                    email = value!;
-                  },
-                ),
-                TextFormField(
-                  decoration: const InputDecoration(labelText: 'Пароль'),
-                  obscureText: true,
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Введите пароль';
-                    }
-                    return null;
-                  },
-                  onSaved: (value) {
-                    password = value!;
-                  },
-                ),
-                const SizedBox(height: 20),
-                ElevatedButton(
-                  onPressed: login,
-                  child: const Text('Войти'),
-                ),
-              ],
+        appBar: AppBar(
+          title: const Text('Вход'),
+        ),
+        body: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: isLoading
+              ? const Center(child: CircularProgressIndicator())
+              : Form(
+            key: _formKey,
+            child: SingleChildScrollView(
+              // To prevent overflow
+              child: Column(
+                children: [
+                  TextFormField(
+                    decoration:
+                    const InputDecoration(labelText: 'Email'),
+                    keyboardType: TextInputType.emailAddress,
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Введите email';
+                      }
+                      if (!RegExp(r'^[^@]+@[^@]+\.[^@]+')
+                          .hasMatch(value)) {
+                        return 'Введите корректный email';
+                      }
+                      return null;
+                    },
+                    onSaved: (value) {
+                      email = value!;
+                    },
+                  ),
+                  TextFormField(
+                    decoration:
+                    const InputDecoration(labelText: 'Пароль'),
+                    obscureText: true,
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Введите пароль';
+                      }
+                      return null;
+                    },
+                    onSaved: (value) {
+                      password = value!;
+                    },
+                  ),
+                  const SizedBox(height: 20),
+                  ElevatedButton(
+                    onPressed: login,
+                    child: const Text('Войти'),
+                  ),
+                ],
+              ),
             ),
           ),
-        ),
-      ),
-    );
+        ));
   }
 }
 
-
-/// Главная страница с продуктами
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
 
@@ -769,15 +754,15 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  final ApiService apiService = ApiService();
   late Future<List<Product>> productsFuture;
-  List<Product> allProducts = []; // Все продукты
-  List<Product> filteredProducts = []; // Отфильтрованные продукты
+  List<Product> allProducts = [];
+  List<Product> filteredProducts = [];
   final TextEditingController _searchController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
+    final apiService = Provider.of<ApiService>(context, listen: false);
     productsFuture = apiService.fetchProducts();
     _searchController.addListener(_onSearchChanged);
   }
@@ -801,6 +786,7 @@ class _HomePageState extends State<HomePage> {
 
   // Обновить список продуктов
   void refreshProducts() {
+    final apiService = Provider.of<ApiService>(context, listen: false);
     setState(() {
       productsFuture = apiService.fetchProducts();
     });
@@ -808,7 +794,8 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    final favoritesProvider = p.Provider.of<FavoritesProvider>(context);
+    final favoritesProvider = Provider.of<FavoritesProvider>(context);
+    final apiService = Provider.of<ApiService>(context, listen: false);
     return Scaffold(
       appBar: AppBar(
         title: const Text('Витрина продуктов'),
@@ -835,7 +822,8 @@ class _HomePageState extends State<HomePage> {
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(56.0),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+            padding:
+            const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
             child: TextField(
               controller: _searchController,
               decoration: InputDecoration(
@@ -854,119 +842,132 @@ class _HomePageState extends State<HomePage> {
       body: FutureBuilder<List<Product>>(
         future: productsFuture,
         builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snapshot.hasError) {
+          if (snapshot.hasData) {
+            allProducts = snapshot.data!;
+            final displayProducts = _searchController.text.isEmpty
+                ? allProducts
+                : filteredProducts;
+
+            if (displayProducts.isEmpty) {
+              return const Center(child: Text('Нет товаров, соответствующих запросу'));
+            }
+
+            return ListView.builder(
+              itemCount: displayProducts.length,
+              itemBuilder: (context, index) {
+                final product = displayProducts[index];
+                final isFavorite =
+                favoritesProvider.isFavorite(product.productId);
+                return Card(
+                  margin: const EdgeInsets.all(8.0),
+                  child: ListTile(
+                    title: Text(product.name),
+                    subtitle: Text(
+                        product.description.isNotEmpty
+                            ? product.description
+                            : 'Нет описания'),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // Иконка избранного
+                        IconButton(
+                          icon: Icon(
+                            isFavorite
+                                ? Icons.favorite
+                                : Icons.favorite_border,
+                            color: isFavorite ? Colors.red : Colors.grey,
+                          ),
+                          onPressed: () async {
+                            if (isFavorite) {
+                              await favoritesProvider
+                                  .removeFromFavorites(product);
+                            } else {
+                              await favoritesProvider.addToFavorites(product);
+                            }
+                            // Обновить состояние
+                            setState(() {});
+                          },
+                        ),
+                        // Цена
+                        Text('${product.price.toStringAsFixed(2)} ₽'),
+                        // Кнопка удаления товара (опционально)
+                        IconButton(
+                          icon: const Icon(Icons.delete, color: Colors.red),
+                          onPressed: () async {
+                            bool confirm = await showDialog(
+                              context: context,
+                              builder: (context) => AlertDialog(
+                                title: const Text('Подтверждение'),
+                                content: const Text(
+                                    'Вы уверены, что хотите удалить этот товар?'),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () =>
+                                        Navigator.of(context).pop(false),
+                                    child: const Text('Нет'),
+                                  ),
+                                  TextButton(
+                                    onPressed: () =>
+                                        Navigator.of(context).pop(true),
+                                    child: const Text('Да'),
+                                  ),
+                                ],
+                              ),
+                            );
+                            if (confirm) {
+                              try {
+                                await apiService.deleteProduct(
+                                    product.productId);
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                      content: Text(
+                                          '${product.name} удален')),
+                                );
+                                refreshProducts();
+                              } catch (e) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                      content: Text(
+                                          'Ошибка удаления товара: $e')),
+                                );
+                              }
+                            }
+                          },
+                        ),
+                      ],
+                    ),
+                    leading: product.imageUrl.isNotEmpty
+                        ? Image.asset(
+                      product.imageUrl,
+                      width: 50,
+                      height: 50,
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) {
+                        return const Icon(Icons.image_not_supported);
+                      },
+                    )
+                        : const Icon(Icons.image),
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => ProductDetailsPage(
+                            product: product,
+                          ),
+                        ),
+                      ).then((_) {
+                        refreshProducts();
+                        favoritesProvider.loadFavorites();
+                      });
+                    },
+                  ),
+                );
+              },
+            );
+          } else if (snapshot.hasError) {
             return Center(child: Text('Ошибка: ${snapshot.error}'));
           }
-
-          allProducts = snapshot.data!;
-          // Если есть поисковый запрос, используем отфильтрованный список, иначе все продукты
-          final displayProducts = _searchController.text.isEmpty
-              ? allProducts
-              : filteredProducts;
-
-          if (displayProducts.isEmpty) {
-            return const Center(child: Text('Нет товаров, соответствующих запросу'));
-          }
-
-          return ListView.builder(
-            itemCount: displayProducts.length,
-            itemBuilder: (context, index) {
-              final product = displayProducts[index];
-              final isFavorite = favoritesProvider.isFavorite(product.productId);
-              return Card(
-                margin: const EdgeInsets.all(8.0),
-                child: ListTile(
-                  title: Text(product.name),
-                  subtitle: Text(product.description.isNotEmpty ? product.description : 'Нет описания'),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // Иконка избранного
-                      IconButton(
-                        icon: Icon(
-                          isFavorite ? Icons.favorite : Icons.favorite_border,
-                          color: isFavorite ? Colors.red : Colors.grey,
-                        ),
-                        onPressed: () async {
-                          if (isFavorite) {
-                            await favoritesProvider.removeFromFavorites(product);
-                          } else {
-                            await favoritesProvider.addToFavorites(product);
-                          }
-                          refreshProducts();
-                        },
-                      ),
-                      // Цена
-                      Text('${product.price.toStringAsFixed(2)} ₽'),
-                      // Кнопка удаления товара
-                      IconButton(
-                        icon: const Icon(Icons.delete, color: Colors.red),
-                        onPressed: () async {
-                          bool confirm = await showDialog(
-                            context: context,
-                            builder: (context) => AlertDialog(
-                              title: const Text('Подтверждение'),
-                              content: const Text('Вы уверены, что хотите удалить этот товар?'),
-                              actions: [
-                                TextButton(
-                                  onPressed: () => Navigator.of(context).pop(false),
-                                  child: const Text('Нет'),
-                                ),
-                                TextButton(
-                                  onPressed: () => Navigator.of(context).pop(true),
-                                  child: const Text('Да'),
-                                ),
-                              ],
-                            ),
-                          );
-                          if (confirm) {
-                            try {
-                              await apiService.deleteProduct(product.productId);
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text('${product.name} удален')),
-                              );
-                              refreshProducts();
-                            } catch (e) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text('Ошибка удаления товара: $e')),
-                              );
-                            }
-                          }
-                        },
-                      ),
-                    ],
-                  ),
-                  leading: product.imageUrl.isNotEmpty
-                      ? Image.network(
-                    product.imageUrl,
-                    width: 50,
-                    height: 50,
-                    fit: BoxFit.cover,
-                    errorBuilder: (context, error, stackTrace) {
-                      return const Icon(Icons.image_not_supported);
-                    },
-                  )
-                      : const Icon(Icons.image),
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => ProductDetailsPage(
-                          product: product,
-                        ),
-                      ),
-                    ).then((_) {
-                      refreshProducts();
-                      favoritesProvider.loadFavorites();
-                    });
-                  },
-                ),
-              );
-            },
-          );
+          return const Center(child: CircularProgressIndicator());
         },
       ),
       floatingActionButton: FloatingActionButton(
@@ -977,22 +978,17 @@ class _HomePageState extends State<HomePage> {
             MaterialPageRoute(builder: (context) => const CreateProductPage()),
           ).then((newProduct) {
             if (newProduct != null && newProduct is Product) {
-              setState(() {
-                allProducts.add(newProduct); // Добавляем в общий список
-                _searchController.text = newProduct.name; // Устанавливаем поисковый запрос
-                _onSearchChanged(); // Обновляем фильтр
-              });
+              refreshProducts();
             }
-            favoritesProvider.loadFavorites();
+            Provider.of<FavoritesProvider>(context, listen: false)
+                .loadFavorites();
           });
-
         },
       ),
     );
   }
 }
 
-/// Страница деталей продукта
 class ProductDetailsPage extends StatefulWidget {
   final Product product;
 
@@ -1003,7 +999,6 @@ class ProductDetailsPage extends StatefulWidget {
 }
 
 class _ProductDetailsPageState extends State<ProductDetailsPage> {
-  final ApiService apiService = ApiService();
   bool isFavorite = false;
   bool isLoading = false;
 
@@ -1014,7 +1009,8 @@ class _ProductDetailsPageState extends State<ProductDetailsPage> {
   }
 
   void checkFavorite() {
-    final favoritesProvider = p.Provider.of<FavoritesProvider>(context, listen: false);
+    final favoritesProvider =
+    Provider.of<FavoritesProvider>(context, listen: false);
     setState(() {
       isFavorite = favoritesProvider.isFavorite(widget.product.productId);
     });
@@ -1024,7 +1020,8 @@ class _ProductDetailsPageState extends State<ProductDetailsPage> {
     setState(() {
       isLoading = true;
     });
-    final favoritesProvider = p.Provider.of<FavoritesProvider>(context, listen: false);
+    final favoritesProvider =
+    Provider.of<FavoritesProvider>(context, listen: false);
     try {
       if (isFavorite) {
         await favoritesProvider.removeFromFavorites(widget.product);
@@ -1035,7 +1032,10 @@ class _ProductDetailsPageState extends State<ProductDetailsPage> {
         isFavorite = !isFavorite;
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(isFavorite ? 'Добавлено в избранное' : 'Удалено из избранного')),
+        SnackBar(
+            content: Text(isFavorite
+                ? 'Добавлено в избранное'
+                : 'Удалено из избранного')),
       );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1049,9 +1049,9 @@ class _ProductDetailsPageState extends State<ProductDetailsPage> {
   }
 
   void addToCart() async {
-    final cartProvider = p.Provider.of<CartProvider>(context, listen: false);
+    final cartProvider = Provider.of<CartProvider>(context, listen: false);
     try {
-      cartProvider.addToCart(widget.product);
+      await cartProvider.addToCart(widget.product);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('${widget.product.name} добавлен в корзину')),
       );
@@ -1089,7 +1089,7 @@ class _ProductDetailsPageState extends State<ProductDetailsPage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               widget.product.imageUrl.isNotEmpty
-                  ? Image.network(
+                  ? Image.asset(
                 widget.product.imageUrl,
                 height: 200,
                 width: double.infinity,
@@ -1102,7 +1102,8 @@ class _ProductDetailsPageState extends State<ProductDetailsPage> {
               const SizedBox(height: 16),
               Text(
                 widget.product.name,
-                style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                style:
+                const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 8),
               Text(widget.product.description),
@@ -1130,8 +1131,8 @@ class CartPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cartProvider = p.Provider.of<CartProvider>(context);
-    final ordersProvider = p.Provider.of<OrdersProvider>(context);
+    final cartProvider = Provider.of<CartProvider>(context);
+    final ordersProvider = Provider.of<OrdersProvider>(context);
     final cartItems = cartProvider.items;
 
     return Scaffold(
@@ -1172,6 +1173,7 @@ class CartPage extends StatelessWidget {
                 const SizedBox(height: 10),
                 ElevatedButton(
                   onPressed: () {
+                    if (cartItems.isEmpty) return;
                     for (var product in cartItems) {
                       ordersProvider.addOrder(product.name, product.price);
                     }
@@ -1191,15 +1193,12 @@ class CartPage extends StatelessWidget {
   }
 }
 
-
-
-/// Страница избранного
 class FavoritesPage extends StatelessWidget {
   const FavoritesPage({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final favoritesProvider = p.Provider.of<FavoritesProvider>(context);
+    final favoritesProvider = Provider.of<FavoritesProvider>(context);
     final favorites = favoritesProvider.favorites;
     return Scaffold(
       appBar: AppBar(title: const Text('Избранное')),
@@ -1213,7 +1212,10 @@ class FavoritesPage extends StatelessWidget {
             margin: const EdgeInsets.all(8.0),
             child: ListTile(
               title: Text(product.name),
-              subtitle: Text(product.description.isNotEmpty ? product.description : 'Нет описания'),
+              subtitle: Text(
+                  product.description.isNotEmpty
+                      ? product.description
+                      : 'Нет описания'),
               trailing: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -1224,11 +1226,15 @@ class FavoritesPage extends StatelessWidget {
                       try {
                         await favoritesProvider.removeFromFavorites(product);
                         ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('${product.name} удален из избранного')),
+                          SnackBar(
+                              content: Text(
+                                  '${product.name} удален из избранного')),
                         );
                       } catch (e) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Ошибка удаления из избранного: $e')),
+                          SnackBar(
+                              content: Text(
+                                  'Ошибка удаления из избранного: $e')),
                         );
                       }
                     },
@@ -1238,7 +1244,7 @@ class FavoritesPage extends StatelessWidget {
                 ],
               ),
               leading: product.imageUrl.isNotEmpty
-                  ? Image.network(
+                  ? Image.asset(
                 product.imageUrl,
                 width: 50,
                 height: 50,
@@ -1268,7 +1274,6 @@ class FavoritesPage extends StatelessWidget {
   }
 }
 
-/// Страница создания продукта
 class CreateProductPage extends StatefulWidget {
   const CreateProductPage({super.key});
 
@@ -1277,7 +1282,6 @@ class CreateProductPage extends StatefulWidget {
 }
 
 class _CreateProductPageState extends State<CreateProductPage> {
-  final ApiService apiService = ApiService();
   final _formKey = GlobalKey<FormState>();
 
   String name = '';
@@ -1295,15 +1299,15 @@ class _CreateProductPageState extends State<CreateProductPage> {
         isLoading = true;
       });
       try {
+        final apiService =
+        Provider.of<ApiService>(context, listen: false);
         await apiService.createProduct({
-          "name": name,
-          "description": description,
-          "price": price,
-          "stock": stock,
-          "image_url": imageUrl,
+          'name': name,
+          'description': description,
+          'price': price,
+          'stock': stock,
+          'image_url': imageUrl,
         });
-
-// Создаем локальный объект продукта
         final newProduct = Product(
           productId: DateTime.now().millisecondsSinceEpoch, // Временный ID
           name: name,
@@ -1313,7 +1317,7 @@ class _CreateProductPageState extends State<CreateProductPage> {
           imageUrl: imageUrl,
         );
 
-// Добавляем товар в список
+        // Возвращаем новый продукт назад на предыдущую страницу
         Navigator.pop(context, newProduct);
       } catch (e) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1344,7 +1348,8 @@ class _CreateProductPageState extends State<CreateProductPage> {
               child: Column(
                 children: [
                   TextFormField(
-                    decoration: const InputDecoration(labelText: 'Название'),
+                    decoration:
+                    const InputDecoration(labelText: 'Название'),
                     validator: (value) {
                       if (value == null || value.isEmpty) {
                         return 'Введите название';
@@ -1356,14 +1361,17 @@ class _CreateProductPageState extends State<CreateProductPage> {
                     },
                   ),
                   TextFormField(
-                    decoration: const InputDecoration(labelText: 'Описание'),
+                    decoration:
+                    const InputDecoration(labelText: 'Описание'),
                     onSaved: (value) {
                       description = value ?? '';
                     },
                   ),
                   TextFormField(
-                    decoration: const InputDecoration(labelText: 'Цена'),
-                    keyboardType: TextInputType.numberWithOptions(decimal: true),
+                    decoration:
+                    const InputDecoration(labelText: 'Цена'),
+                    keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
                     validator: (value) {
                       if (value == null || value.isEmpty) {
                         return 'Введите цену';
@@ -1378,7 +1386,8 @@ class _CreateProductPageState extends State<CreateProductPage> {
                     },
                   ),
                   TextFormField(
-                    decoration: const InputDecoration(labelText: 'Количество на складе'),
+                    decoration: const InputDecoration(
+                        labelText: 'Количество на складе'),
                     keyboardType: TextInputType.number,
                     validator: (value) {
                       if (value == null || value.isEmpty) {
@@ -1394,7 +1403,8 @@ class _CreateProductPageState extends State<CreateProductPage> {
                     },
                   ),
                   TextFormField(
-                    decoration: const InputDecoration(labelText: 'URL изображения'),
+                    decoration: const InputDecoration(
+                        labelText: 'URL изображения'),
                     onSaved: (value) {
                       imageUrl = value ?? '';
                     },
@@ -1409,5 +1419,167 @@ class _CreateProductPageState extends State<CreateProductPage> {
             ),
           ),
         ));
+  }
+}
+
+class OrdersPage extends StatelessWidget {
+  const OrdersPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final ordersProvider = Provider.of<OrdersProvider>(context);
+    final orders = ordersProvider.orders;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Мои заказы')),
+      body: orders.isEmpty
+          ? const Center(child: Text('У вас пока нет заказов'))
+          : ListView.builder(
+        itemCount: orders.length,
+        itemBuilder: (context, index) {
+          final order = orders[index];
+          return Card(
+            margin: const EdgeInsets.all(8.0),
+            child: ListTile(
+              title: Text(order.productName),
+              subtitle: Text(
+                'Статус: ${order.status}\nЦена: ${order.price.toStringAsFixed(2)} ₽',
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+// ---------------------- Чат ----------------------
+
+class LocalChatPage extends StatefulWidget {
+  const LocalChatPage({super.key});
+
+  @override
+  State<LocalChatPage> createState() => _LocalChatPageState();
+}
+
+class _LocalChatPageState extends State<LocalChatPage> {
+  final TextEditingController _controller = TextEditingController();
+  final String user = 'alla@polo.ru';
+  final String admin = 'admin@admin.ru';
+
+  @override
+  Widget build(BuildContext context) {
+    final chatProvider = Provider.of<ChatProvider>(context);
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+
+    // Определение текущего пользователя
+    String currentUser = authProvider.userEmail == 'admin@admin.ru'
+        ? admin
+        : user;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Чат'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.delete),
+            onPressed: () async {
+              bool confirm = await showDialog(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: const Text('Очистить чат'),
+                  content:
+                  const Text('Вы уверены, что хотите очистить все сообщения?'),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(false),
+                      child: const Text('Нет'),
+                    ),
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(true),
+                      child: const Text('Да'),
+                    ),
+                  ],
+                ),
+              );
+              if (confirm) {
+                await chatProvider.clearMessages();
+              }
+            },
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          Expanded(
+            child: chatProvider.messages.isEmpty
+                ? const Center(child: Text('Чат пуст'))
+                : ListView.builder(
+              itemCount: chatProvider.messages.length,
+              itemBuilder: (context, index) {
+                final message = chatProvider.messages[index];
+                bool isMe = message.sender == currentUser;
+                return Align(
+                  alignment:
+                  isMe ? Alignment.centerRight : Alignment.centerLeft,
+                  child: Container(
+                    padding: const EdgeInsets.all(10.0),
+                    margin: const EdgeInsets.symmetric(
+                        vertical: 2.0, horizontal: 8.0),
+                    decoration: BoxDecoration(
+                      color: isMe ? Colors.blue[100] : Colors.grey[300],
+                      borderRadius: BorderRadius.circular(8.0),
+                    ),
+                    child: Text(message.content),
+                  ),
+                );
+              },
+            ),
+          ),
+          const Divider(height: 1),
+          Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _controller,
+                    decoration: const InputDecoration(
+                      hintText: 'Введите сообщение',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.send),
+                  onPressed: () async {
+                    if (_controller.text.trim().isEmpty) return;
+                    final message = Message(
+                      sender: currentUser,
+                      content: _controller.text.trim(),
+                      timestamp: DateTime.now(),
+                    );
+                    await chatProvider.addMessage(message);
+                    _controller.clear();
+
+                    // Автоматический ответ администратора, если пользователь отправил сообщение
+                    if (currentUser == user) {
+                      Future.delayed(const Duration(seconds: 1), () async {
+                        final adminMessage = Message(
+                          sender: admin,
+                          content: 'Принято, я свяжусь с вами.',
+                          timestamp: DateTime.now(),
+                        );
+                        await chatProvider.addMessage(adminMessage);
+                      });
+                    }
+                  },
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

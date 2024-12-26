@@ -1,186 +1,72 @@
+// lib/services/api_service.dart
+
 import 'dart:convert';
-import 'package:http/http.dart' as http;
+import 'package:flutter/services.dart' show rootBundle;
+import 'package:shared_preferences/shared_preferences.dart';
+import '../models/product.dart';
 
 class ApiService {
-  final String baseUrl = 'http://10.0.2.2:8080';
+  static const String _productsKey = 'products';
 
-  // Получить все продукты
-  Future<List<dynamic>> fetchProducts() async {
-    try {
-      final response = await http.get(Uri.parse('$baseUrl/products'));
-      print('Статус-код: ${response.statusCode}');
-      print('Ответ: ${response.body}');
-      if (response.statusCode == 200) {
-        return json.decode(response.body);
-      } else {
-        throw Exception("Ошибка загрузки данных: ${response.statusCode}");
-      }
-    } catch (e) {
-      print('Ошибка запроса: $e');
-      throw Exception("Ошибка загрузки данных");
+  /// Получить все продукты
+  Future<List<Product>> fetchProducts() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String? productsData = prefs.getString(_productsKey);
+
+    if (productsData != null) {
+      // Если данные уже сохранены в SharedPreferences, загрузить их
+      List<dynamic> jsonData = json.decode(productsData);
+      return jsonData.map((json) => Product.fromJson(json)).toList();
+    } else {
+      // Иначе загрузить из локального JSON-файла
+      String jsonString = await rootBundle.loadString('data/products.json');
+      List<dynamic> jsonData = json.decode(jsonString);
+      List<Product> products =
+      jsonData.map((json) => Product.fromJson(json)).toList();
+
+      // Сохранить загруженные данные в SharedPreferences для дальнейшего использования
+      await prefs.setString(
+          _productsKey, json.encode(products.map((p) => p.toJson()).toList()));
+
+      return products;
     }
   }
 
-  // Создать продукт
+  /// Создать продукт
   Future<void> createProduct(Map<String, dynamic> productData) async {
-    try {
-      final response = await http.post(
-        Uri.parse("$baseUrl/products/create"),
-        headers: {"Content-Type": "application/json"},
-        body: json.encode(productData),
-      );
-      print('Статус-код создания: ${response.statusCode}');
-      print('Ответ создания: ${response.body}');
-      if (response.statusCode != 201) {
-        throw Exception("Ошибка создания продукта: ${response.statusCode}");
-      }
-    } catch (e) {
-      print('Ошибка запроса при создании: $e');
-      throw Exception("Ошибка создания продукта: $e");
-    }
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    List<Product> products = await fetchProducts();
+
+    // Генерация уникального ID (можно улучшить)
+    int newProductId = products.isNotEmpty
+        ? products.map((p) => p.productId).reduce((a, b) => a > b ? a : b) + 1
+        : 1;
+
+    Product newProduct = Product(
+      productId: newProductId,
+      name: productData['name'],
+      description: productData['description'],
+      price: (productData['price'] as num).toDouble(),
+      stock: productData['stock'],
+      imageUrl: productData['image_url'],
+    );
+
+    products.add(newProduct);
+
+    // Сохранить обновленный список продуктов
+    await prefs.setString(
+        _productsKey, json.encode(products.map((p) => p.toJson()).toList()));
   }
 
-  // Удалить продукт
+  /// Удалить продукт
   Future<void> deleteProduct(int productId) async {
-    try {
-      final response = await http.delete(Uri.parse('$baseUrl/products/delete/$productId'));
-      print('Статус-код удаления: ${response.statusCode}');
-      print('Ответ удаления: ${response.body}');
-      if (response.statusCode != 200) {
-        throw Exception("Ошибка удаления продукта: ${response.statusCode}");
-      }
-    } catch (e) {
-      print('Ошибка запроса при удалении: $e');
-      throw Exception("Ошибка удаления продукта: $e");
-    }
-  }
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    List<Product> products = await fetchProducts();
 
-  /* ----------------------- Функционал Избранного (Favorites) ----------------------- */
+    products.removeWhere((product) => product.productId == productId);
 
-  // Добавить в избранное
-  Future<void> addToFavorites(int productId, int userId) async {
-    try {
-      final response = await http.post(
-        Uri.parse('$baseUrl/favorites/add'),
-        headers: {"Content-Type": "application/json"},
-        body: json.encode({"product_id": productId, "user_id": userId}),
-      );
-      print('Статус-код добавления в избранное: ${response.statusCode}');
-      print('Ответ добавления в избранное: ${response.body}');
-      if (response.statusCode != 200) {
-        throw Exception("Ошибка добавления в избранное: ${response.statusCode}");
-      }
-    } catch (e) {
-      print('Ошибка запроса при добавлении в избранное: $e');
-      throw Exception("Ошибка добавления в избранное: $e");
-    }
-  }
-
-  // Удалить из избранного
-  Future<void> removeFromFavorites(int productId, int userId) async {
-    try {
-      final response = await http.delete(
-        Uri.parse('$baseUrl/favorites/remove/$productId?user_id=$userId'),
-      );
-      print('Статус-код удаления из избранного: ${response.statusCode}');
-      print('Ответ удаления из избранного: ${response.body}');
-      if (response.statusCode != 200) {
-        throw Exception("Ошибка удаления из избранного: ${response.statusCode}");
-      }
-    } catch (e) {
-      print('Ошибка запроса при удалении из избранного: $e');
-      throw Exception("Ошибка удаления из избранного: $e");
-    }
-  }
-
-  // Получить избранные товары
-  Future<List<dynamic>> fetchFavorites(int userId) async {
-    try {
-      final response = await http.get(Uri.parse('$baseUrl/favorites?user_id=$userId'));
-      print('Статус-код получения избранного: ${response.statusCode}');
-      print('Ответ получения избранного: ${response.body}');
-      if (response.statusCode == 200) {
-        return json.decode(response.body);
-      } else {
-        throw Exception("Ошибка загрузки избранных товаров: ${response.statusCode}");
-      }
-    } catch (e) {
-      print('Ошибка запроса при получении избранного: $e');
-      throw Exception("Ошибка загрузки избранных товаров: $e");
-    }
-  }
-
-  /* ----------------------- Функционал Корзины (Cart) ----------------------- */
-
-  // Добавить в корзину
-  Future<void> addToCart(int productId, int userId) async {
-    try {
-      final response = await http.post(
-        Uri.parse('$baseUrl/cart/add'),
-        headers: {"Content-Type": "application/json"},
-        body: json.encode({"product_id": productId, "user_id": userId}),
-      );
-      print('Статус-код добавления в корзину: ${response.statusCode}');
-      print('Ответ добавления в корзину: ${response.body}');
-      if (response.statusCode != 200) {
-        throw Exception("Ошибка добавления в корзину: ${response.statusCode}");
-      }
-    } catch (e) {
-      print('Ошибка запроса при добавлении в корзину: $e');
-      throw Exception("Ошибка добавления в корзину: $e");
-    }
-  }
-
-  // Удалить из корзины
-  Future<void> removeFromCart(int productId, int userId) async {
-    try {
-      final response = await http.delete(
-        Uri.parse('$baseUrl/cart/remove/$productId?user_id=$userId'),
-      );
-      print('Статус-код удаления из корзины: ${response.statusCode}');
-      print('Ответ удаления из корзины: ${response.body}');
-      if (response.statusCode != 200) {
-        throw Exception("Ошибка удаления из корзины: ${response.statusCode}");
-      }
-    } catch (e) {
-      print('Ошибка запроса при удалении из корзины: $e');
-      throw Exception("Ошибка удаления из корзины: $e");
-    }
-  }
-
-  // Получить корзину
-  Future<List<Product>> fetchCart(int userId) async {
-    try {
-      final response = await http.get(Uri.parse('$baseUrl/cart?user_id=$userId'));
-      print('Статус-код получения корзины: ${response.statusCode}');
-      print('Ответ получения корзины: ${response.body}');
-      if (response.statusCode == 200) {
-        List<dynamic> data = json.decode(response.body);
-        return data.map((json) => Product.fromJson(json)).toList();
-      } else {
-        throw Exception("Ошибка загрузки корзины: ${response.statusCode}");
-      }
-    } catch (e) {
-      print('Ошибка запроса при получении корзины: $e');
-      throw Exception("Ошибка загрузки корзины: $e");
-    }
+    // Сохранить обновленный список продуктов
+    await prefs.setString(
+        _productsKey, json.encode(products.map((p) => p.toJson()).toList()));
   }
 }
-
-  // Создать пользователя в серверной базе данных
-  Future<void> createUser(String userId) async {
-    try {
-      final response = await http.post(
-        Uri.parse('$baseUrl/users/create'),
-        headers: {"Content-Type": "application/json"},
-        body: json.encode({"user_id": userId}),
-      );
-      if (response.statusCode != 201) {
-        throw Exception("Ошибка создания пользователя: ${response.statusCode}");
-      }
-    } catch (e) {
-      throw Exception("Ошибка создания пользователя: $e");
-    }
-  }
-
-

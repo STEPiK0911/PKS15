@@ -1,13 +1,17 @@
+// android/build.gradle
+
 buildscript {
     repositories {
         google()
         mavenCentral()
     }
     dependencies {
-        // Плагин для Gradle
+        // Плагин Android Gradle
         classpath 'com.android.tools.build:gradle:7.4.2'
         // Плагин Google Services
         classpath 'com.google.gms:google-services:4.3.14'
+        // Плагин Kotlin Gradle
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:1.8.10" // Убедитесь, что версия актуальна
     }
 }
 
